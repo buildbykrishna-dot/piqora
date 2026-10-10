@@ -8,77 +8,54 @@ Production Domain: `https://piqora.vercel.app`
 
 ## 🚀 Key Features
 
-1. **Mobile-First Student Game-Joining:**
-   - Prominent Game PIN entry directly on the homepage (`/` and `/join`).
-   - Supports `/join?pin=123456` with automatic PIN pre-fill.
-   - Live session validation, active status check, and duplicate nickname prevention.
-   - Zero registration required for students.
+1. **Teacher Authentication (Firebase Email & Password):**
+   - **Account Registration (`/register`):** Faculty can register with full name, email, password (minimum 8 characters), and password confirmation with show/hide password toggles.
+   - **Faculty Login (`/login`):** Email and password authentication with clear error messages for invalid credentials, disabled accounts, and network errors.
+   - **Password Reset:** Built-in "Forgot Password?" dialog triggering Firebase's `sendPasswordResetEmail`.
+   - **Instant Demo Mode:** Included for quick evaluator/grading previewing.
 
-2. **Shareable Session QR Codes:**
-   - Every live quiz host screen (`/host/:id`) renders a high-resolution QR code encoding the production join URL (`https://piqora.vercel.app/join?pin=[PIN]`).
-   - Students can aim their phone camera at the classroom projector screen and join instantly.
+2. **Teacher Authorization & Security Rules:**
+   - On registration, a teacher profile is provisioned in Firestore under `/profiles/{uid}` with `role: 'teacher'`.
+   - Hardened `firestore.rules` enforces that only authenticated users with a valid `role == 'teacher'` or `admin` in `/profiles/{uid}` can create or modify quizzes, questions, question banks, lessons, and live sessions.
+   - Role escalation attacks are blocked: users cannot elevate their role to `admin` or change their role field during updates.
+   - Protected routes (`/dashboard`, `/dashboard/content`, etc.) require an authenticated teacher session and redirect to `/login`.
 
-3. **Teacher Authentication with Google Sign-In:**
-   - Dedicated `/login` page with polished "Continue with Google" sign-in.
-   - Powered by Firebase Authentication SDK (`GoogleAuthProvider` via `signInWithPopup`).
-   - Role-based authorization: user profiles in `profiles/{uid}` control teacher status and permissions.
-   - Protected teacher routes (`/dashboard`, `/dashboard/content`, `/dashboard/quizzes/*`, etc.) with redirection to `/login` if unauthenticated.
-   - Built-in instant faculty demo mode for rapid reviewer testing.
+3. **Public Anonymous Student Experience:**
+   - The homepage (`/`) and join portal (`/join`) are 100% public.
+   - Students join live games with a 6-digit game PIN and display nickname without needing an account or login.
+   - Deep-linking support for `/join?pin=123456` with automatic PIN pre-fill.
+   - Duplicate student nicknames in the same room are rejected with inline feedback.
 
-4. **Classroom Live Gaming Engine:**
-   - Unique 6-digit session PIN generation.
-   - Live waiting room with animated participant badges.
-   - 4 large distinct color answer buttons:
-     - ▲ Red (Option A)
-     - ◆ Blue (Option B)
-     - ● Amber (Option C)
-     - ■ Emerald (Option D)
-   - Real-time countdown timer, live answer counter, and authoritative scoring.
-   - Post-question answer reveal with student choice distribution bars and faculty explanations.
-   - Standings leaderboard and 3-tier podium celebration with confetti!
+4. **Live Classroom Projector & Shareable QR Codes:**
+   - Every live session (`/host/:id`) generates a shareable, high-resolution QR code encoding `https://piqora.vercel.app/join?pin=[PIN]`.
+   - Real-time countdown timer ring, answer response counter, answer choice distribution bar chart, and 3-tier celebration podium with confetti.
 
-5. **Curriculum Creation & Question Banks:**
+5. **Curriculum Tools & Comprehension Analytics:**
    - Manual 4-option Quiz Editor with draft and publish toggles.
-   - Reusable Question Banks (pool questions by semester and module).
-   - Revision Lessons with rich formatting and external lecture links.
-   - 1-click CSV and Excel template downloader and spreadsheet import wizard.
-
-6. **Comprehension Analytics:**
-   - Question-by-question accuracy bar chart powered by Recharts.
-   - "Hardest Questions" review to identify lecture topics needing re-teaching.
-   - Downloadable summary reports.
+   - Reusable Question Banks & Curriculum Pools.
+   - Revision Lessons with rich formatting and external links.
+   - Standardized CSV (`piqora_questions_template.csv`) and Excel (`piqora_questions_template.xlsx`) spreadsheet import.
+   - Recharts-powered question accuracy analytics with "Hardest Questions" alerts.
 
 ---
 
-## 🛠️ Tech Stack
+## 📋 Firebase Console Configuration
 
-- **Frontend:** React 19, TypeScript, Vite, Tailwind CSS, Lucide React, Canvas-Confetti, QRCode
-- **Analytics Visualizations:** Recharts
-- **Spreadsheet Processing:** PapaParse (CSV) & SheetJS XLSX (Excel)
-- **Database & Auth:** Cloud Firestore & Firebase Authentication (Google Sign-In)
-- **Deployment:** Vercel (`vercel.json` SPA rewrites) & Google Cloud Run
+To enable Email/Password authentication for Piqora:
 
----
+1. Open the [Firebase Console](https://console.firebase.google.com/) → Your Project.
+2. Navigate to **Build** → **Authentication** → **Sign-in method**.
+3. Under **Sign-in providers**, click **Email/Password**.
+4. Toggle **Email/Password** to **Enabled** (you do not need Email link passwordless).
+5. Click **Save**.
 
-## 📋 Required Firebase Console Configuration
-
-To enable Google Sign-In on your production domain:
-
-1. **Enable Google Sign-in Provider:**
-   - Go to [Firebase Console](https://console.firebase.google.com/) → Your Project → **Authentication** → **Sign-in method**.
-   - Click **Google**, toggle **Enable**, select the project support email, and click **Save**.
-
-2. **Add Authorized Domains:**
-   - In Firebase Console → **Authentication** → **Settings** → **Authorized domains**.
-   - Click **Add domain** and add:
-     - `piqora.vercel.app`
-     - Any custom Vercel preview domains (`*.vercel.app`)
+*Note: Since standard Email/Password authentication is used, teachers do not need Google OAuth authorization or domain allowlisting.*
 
 ---
 
-## 🚢 Vercel Deployment
+## 🚢 Free Vercel Deployment
 
-A `vercel.json` configuration file is included to configure Single Page Application rewrites so direct navigation to `/join`, `/login`, `/dashboard`, `/host/:id`, and `/play/:id` works seamlessly:
+A `vercel.json` file is configured in the repository root for Single Page Application routing:
 
 ```json
 {
@@ -91,11 +68,7 @@ A `vercel.json` configuration file is included to configure Single Page Applicat
 }
 ```
 
-Deploying to Vercel:
-```bash
-npm install -g vercel
-vercel
-```
+This guarantees that direct navigation or browser refresh on `/register`, `/login`, `/join`, `/dashboard`, `/host/:id`, and `/play/:id` loads correctly without 404 errors.
 
 ---
 
@@ -105,8 +78,12 @@ vercel
 # Install dependencies
 npm install
 
-# Start development server
+# Start Vite dev server on port 3000
 npm run dev
-```
 
-The app will run locally at `http://localhost:3000`.
+# Lint and check types
+npm run lint
+
+# Build for production
+npm run build
+```

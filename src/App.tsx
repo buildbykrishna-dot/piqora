@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { LandingPage } from './pages/LandingPage';
-import { AuthPages } from './pages/AuthPages';
+import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
 import { DashboardOverview } from './pages/DashboardOverview';
 import { ContentPage } from './pages/ContentPage';
 import { QuizEditorPage } from './pages/QuizEditorPage';
@@ -137,17 +138,20 @@ function MainRouter() {
     );
   }
 
-  // 5. Teacher Auth Screen (/login and /signup both route to Google Sign-In)
-  if (currentPath === '/login' || currentPath === '/signup') {
-    return <AuthPages onNavigate={navigate} />;
+  // 5. Teacher Auth Screens
+  if (currentPath === '/login') {
+    return <LoginPage onNavigate={navigate} />;
+  }
+  if (currentPath === '/register' || currentPath === '/signup') {
+    return <RegisterPage onNavigate={navigate} />;
   }
 
   // --- DASHBOARD LAYOUT (With Sidebar, Navbar, and Create Modal) ---
   const isDashboardRoute = currentPath.startsWith('/dashboard') || currentPath === '/settings';
 
-  // Protect teacher dashboard routes: require authenticated Google teacher session
+  // Protect teacher dashboard routes: require authenticated teacher session
   if (isDashboardRoute && !user && !loading) {
-    return <AuthPages onNavigate={navigate} />;
+    return <LoginPage onNavigate={navigate} />;
   }
 
   let pageTitle = 'Dashboard';

@@ -15,12 +15,14 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    // Role-based Access Control: Enforces that user has verified teacher/admin profile in Firestore
     function isTeacher() {
-      return isSignedIn() && (
-        !exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) ||
-        get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'teacher' ||
-        get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'admin'
-      );
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) && 
+        (
+          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'teacher' ||
+          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'admin'
+        );
     }
 
     // Default deny all unknown paths
@@ -36,8 +38,10 @@ service cloud.firestore {
     // User Profiles
     match /profiles/{userId} {
       allow get: if isSignedIn() && (request.auth.uid == userId);
-      allow create: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId;
-      allow update: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId;
+      // Teachers can create their initial profile with role 'teacher', but cannot assign 'admin'
+      allow create: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId && request.resource.data.role == 'teacher';
+      // Role field cannot be elevated during updates by client
+      allow update: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId && request.resource.data.role == resource.data.role;
       allow delete: if false;
     }
 
