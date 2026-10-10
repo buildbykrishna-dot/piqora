@@ -1,0 +1,6 @@
+{
+  "name": "Piqora",
+  "description": "College classroom live quiz, interactive revision, and learning analytics platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

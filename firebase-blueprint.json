@@ -1,0 +1,182 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Teacher profile in Piqora",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Teacher Firebase Auth UID" },
+        "email": { "type": "string", "description": "Email address" },
+        "displayName": { "type": "string", "description": "Teacher name" },
+        "college": { "type": "string", "description": "College or university name" },
+        "department": { "type": "string", "description": "Academic department" },
+        "role": { "type": "string", "enum": ["teacher", "admin"], "description": "User role" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName"]
+    },
+    "Quiz": {
+      "title": "Quiz",
+      "description": "Classroom quiz resource created by a teacher",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "courseLabel": { "type": "string", "maxLength": 50 },
+        "coverColor": { "type": "string" },
+        "isPublished": { "type": "boolean" },
+        "isPublic": { "type": "boolean" },
+        "questionsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teacherId", "title", "subject", "isPublished"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Individual 4-option question within a quiz",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "quizId": { "type": "string" },
+        "text": { "type": "string", "maxLength": 500 },
+        "options": { "type": "array" },
+        "correctAnswer": { "type": "string", "enum": ["A", "B", "C", "D"] },
+        "explanation": { "type": "string", "maxLength": 500 },
+        "timeLimit": { "type": "number" },
+        "points": { "type": "number" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "quizId", "text", "options", "correctAnswer"]
+    },
+    "QuestionSet": {
+      "title": "QuestionSet",
+      "description": "Reusable question bank bank for college subjects",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "subject": { "type": "string" },
+        "questionCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teacherId", "title", "subject"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Classroom revision note and lesson document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 500 },
+        "subject": { "type": "string" },
+        "content": { "type": "string" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "teacherId", "title", "subject", "content"]
+    },
+    "QuizSession": {
+      "title": "QuizSession",
+      "description": "Live classroom quiz session with PIN",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "pin": { "type": "string", "maxLength": 6 },
+        "quizId": { "type": "string" },
+        "quizTitle": { "type": "string" },
+        "teacherId": { "type": "string" },
+        "status": { "type": "string", "enum": ["waiting", "question", "reveal", "leaderboard", "finished"] },
+        "currentQuestionIndex": { "type": "number" },
+        "questionStartedAt": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "participantCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "pin", "quizId", "teacherId", "status"]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "Student participating in a live quiz session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "displayName": { "type": "string", "maxLength": 50 },
+        "score": { "type": "number" },
+        "streak": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "answeredCount": { "type": "number" },
+        "lastAnswer": { "type": "string" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sessionId", "displayName", "score"]
+    },
+    "AnswerSubmission": {
+      "title": "AnswerSubmission",
+      "description": "Individual student answer record for a question",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "participantId": { "type": "string" },
+        "questionIndex": { "type": "number" },
+        "selectedOption": { "type": "string", "enum": ["A", "B", "C", "D"] },
+        "isCorrect": { "type": "boolean" },
+        "pointsAwarded": { "type": "number" },
+        "responseTimeMs": { "type": "number" },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sessionId", "participantId", "questionIndex", "selectedOption"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": { "$ref": "UserProfile" },
+      "description": "Teacher profile information"
+    },
+    "/quizzes/{quizId}": {
+      "schema": { "$ref": "Quiz" },
+      "description": "Quiz collection owned by teachers"
+    },
+    "/quizzes/{quizId}/questions/{questionId}": {
+      "schema": { "$ref": "Question" },
+      "description": "Questions inside a specific quiz"
+    },
+    "/questionSets/{setId}": {
+      "schema": { "$ref": "QuestionSet" },
+      "description": "Question banks and reusable sets"
+    },
+    "/questionSets/{setId}/questions/{questionId}": {
+      "schema": { "$ref": "Question" },
+      "description": "Questions inside a reusable question set"
+    },
+    "/lessons/{lessonId}": {
+      "schema": { "$ref": "Lesson" },
+      "description": "Classroom revision lessons"
+    },
+    "/quizSessions/{sessionId}": {
+      "schema": { "$ref": "QuizSession" },
+      "description": "Live interactive quiz session"
+    },
+    "/quizSessions/{sessionId}/participants/{participantId}": {
+      "schema": { "$ref": "Participant" },
+      "description": "Students joined in the live session"
+    },
+    "/quizSessions/{sessionId}/answers/{answerId}": {
+      "schema": { "$ref": "AnswerSubmission" },
+      "description": "Answers submitted by participants during the live quiz"
+    }
+  }
+}

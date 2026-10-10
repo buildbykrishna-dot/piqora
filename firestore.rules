@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Helper Functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isTeacher() {
+      return isSignedIn() && (
+        !exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) ||
+        get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'teacher' ||
+        get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // Default deny all unknown paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Test connection check
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // User Profiles
+    match /profiles/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId);
+      allow create: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId;
+      allow update: if isSignedIn() && request.auth.uid == userId && request.resource.data.uid == userId;
+      allow delete: if false;
+    }
+
+    // Quizzes (Teacher Owned)
+    match /quizzes/{quizId} {
+      allow get: if (isSignedIn() && resource.data.teacherId == request.auth.uid) || resource.data.isPublic == true;
+      allow list: if isSignedIn() && (resource.data.teacherId == request.auth.uid || resource.data.isPublic == true);
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if isTeacher() && resource.data.teacherId == request.auth.uid && request.resource.data.teacherId == request.auth.uid;
+      allow delete: if isTeacher() && resource.data.teacherId == request.auth.uid;
+
+      match /questions/{questionId} {
+        allow read: if isSignedIn();
+        allow write: if isTeacher() && get(/databases/$(database)/documents/quizzes/$(quizId)).data.teacherId == request.auth.uid;
+      }
+    }
+
+    // Question Sets (Reusable Question Bank)
+    match /questionSets/{setId} {
+      allow read: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if isTeacher() && resource.data.teacherId == request.auth.uid;
+      allow delete: if isTeacher() && resource.data.teacherId == request.auth.uid;
+
+      match /questions/{questionId} {
+        allow read, write: if isTeacher() && get(/databases/$(database)/documents/questionSets/$(setId)).data.teacherId == request.auth.uid;
+      }
+    }
+
+    // Lessons (Revision Resources)
+    match /lessons/{lessonId} {
+      allow read: if (isSignedIn() && resource.data.teacherId == request.auth.uid) || resource.data.isPublished == true;
+      allow list: if isSignedIn() && (resource.data.teacherId == request.auth.uid || resource.data.isPublished == true);
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if isTeacher() && resource.data.teacherId == request.auth.uid;
+      allow delete: if isTeacher() && resource.data.teacherId == request.auth.uid;
+    }
+
+    // Live Quiz Sessions
+    match /quizSessions/{sessionId} {
+      // Anyone (including anonymous students) can fetch active session by ID or PIN to play
+      allow get: if true;
+      allow list: if (isSignedIn() && resource.data.teacherId == request.auth.uid) || true;
+      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
+      allow update: if (isTeacher() && resource.data.teacherId == request.auth.uid) || 
+                      // Allow participant count increment
+                      (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participantCount', 'updatedAt']));
+      allow delete: if isTeacher() && resource.data.teacherId == request.auth.uid;
+
+      // Session Participants (Students)
+      match /participants/{participantId} {
+        allow read: if true;
+        allow create: if request.resource.data.sessionId == sessionId;
+        allow update: if request.resource.data.sessionId == sessionId;
+        allow delete: if isSignedIn() && get(/databases/$(database)/documents/quizSessions/$(sessionId)).data.teacherId == request.auth.uid;
+      }
+
+      // Session Answers
+      match /answers/{answerId} {
+        allow read: if true;
+        allow create: if request.resource.data.sessionId == sessionId;
+        allow update: if request.resource.data.sessionId == sessionId;
+        allow delete: if isSignedIn() && get(/databases/$(database)/documents/quizSessions/$(sessionId)).data.teacherId == request.auth.uid;
+      }
+    }
+  }
+}
