@@ -41,6 +41,23 @@ service cloud.firestore {
       );
     }
 
+    // Helper to verify question set ownership across both ownerId and legacy teacherId fields
+    function isSetOwner(setData) {
+      return isSignedIn() && (
+        ('ownerId' in setData && setData.ownerId == request.auth.uid) ||
+        ('teacherId' in setData && setData.teacherId == request.auth.uid)
+      );
+    }
+
+    // Controlled migration rule for question sets
+    function canMigrateSampleSet(setData, setId) {
+      return !('ownerId' in setData) && (
+        setId.matches('^qset-.*') ||
+        (setData.teacherId == 'wt90lrmTuHZ1gu496GfMfB1erdW2') ||
+        (setData.teacherId == 'demo_teacher')
+      );
+    }
+
     // Default deny all unknown paths
     match /{document=**} {
       allow read, write: if false;
@@ -85,32 +102,22 @@ service cloud.firestore {
 
     // Question Sets (Reusable Question Bank)
     match /questionSets/{setId} {
-      allow read: if isSignedIn() && (
-        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
-        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
-      );
+      allow get: if isSetOwner(resource.data) || canMigrateSampleSet(resource.data, setId);
       allow list: if isSignedIn() && (
-        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
-        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
+        isSetOwner(resource.data) || canMigrateSampleSet(resource.data, setId)
       );
       allow create: if isTeacher() && (
         ('ownerId' in request.resource.data && request.resource.data.ownerId == request.auth.uid) ||
         ('teacherId' in request.resource.data && request.resource.data.teacherId == request.auth.uid)
       );
-      allow update: if isTeacher() && (
-        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
-        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
-      );
-      allow delete: if isTeacher() && (
-        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
-        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
-      );
+      allow update: if isTeacher() && 
+        (isSetOwner(resource.data) || canMigrateSampleSet(resource.data, setId)) &&
+        (!('ownerId' in request.resource.data) || request.resource.data.ownerId == request.auth.uid) &&
+        (!('teacherId' in request.resource.data) || request.resource.data.teacherId == request.auth.uid);
+      allow delete: if isTeacher() && isSetOwner(resource.data);
 
       match /questions/{questionId} {
-        allow read, write: if isTeacher() && (
-          ('ownerId' in get(/databases/$(database)/documents/questionSets/$(setId)).data && get(/databases/$(database)/documents/questionSets/$(setId)).data.ownerId == request.auth.uid) ||
-          ('teacherId' in get(/databases/$(database)/documents/questionSets/$(setId)).data && get(/databases/$(database)/documents/questionSets/$(setId)).data.teacherId == request.auth.uid)
-        );
+        allow read, write: if isTeacher() && isSetOwner(get(/databases/$(database)/documents/questionSets/$(setId)).data);
       }
     }
 

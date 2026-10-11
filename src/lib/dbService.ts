@@ -12,7 +12,7 @@ import {
   onSnapshot,
   Timestamp 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, handleFirestoreError, OperationType, sanitizeFirestorePayload } from './firebase';
 import { 
   Quiz, 
   Question, 
@@ -308,12 +308,13 @@ export async function getQuizById(quizId: string): Promise<Quiz | null> {
 export async function saveQuiz(quiz: Quiz): Promise<void> {
   try {
     const canonicalOwner = quiz.ownerId || quiz.teacherId;
-    const payload: Quiz = {
+    const payload: Quiz = sanitizeFirestorePayload({
       ...quiz,
       ownerId: canonicalOwner,
       teacherId: canonicalOwner,
+      courseLabel: quiz.courseLabel || '',
       updatedAt: new Date().toISOString()
-    };
+    });
     await setDoc(doc(db, 'quizzes', quiz.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `quizzes/${quiz.id}`);
@@ -332,27 +333,97 @@ export async function deleteQuiz(quizId: string): Promise<void> {
 
 export async function getTeacherQuestionSets(teacherId: string): Promise<QuestionSet[]> {
   try {
-    const q = query(collection(db, 'questionSets'), where('teacherId', '==', teacherId));
-    const snap = await getDocs(q);
-    const results: QuestionSet[] = [];
-    snap.forEach((d) => results.push(d.data() as QuestionSet));
-    if (results.length === 0) {
+    const setMap = new Map<string, QuestionSet>();
+
+    // 1. Fetch questionSets by teacherId
+    try {
+      const qTeacher = query(collection(db, 'questionSets'), where('teacherId', '==', teacherId));
+      const snapTeacher = await getDocs(qTeacher);
+      snapTeacher.forEach((d) => {
+        const data = d.data() as QuestionSet;
+        setMap.set(d.id, {
+          ...data,
+          id: d.id,
+          ownerId: data.ownerId || data.teacherId || teacherId,
+          teacherId: data.teacherId || teacherId
+        });
+      });
+    } catch (err) {
+      console.warn('Query questionSets by teacherId note:', err);
+    }
+
+    // 2. Fetch questionSets by ownerId
+    try {
+      const qOwner = query(collection(db, 'questionSets'), where('ownerId', '==', teacherId));
+      const snapOwner = await getDocs(qOwner);
+      snapOwner.forEach((d) => {
+        const data = d.data() as QuestionSet;
+        setMap.set(d.id, {
+          ...data,
+          id: d.id,
+          ownerId: data.ownerId || teacherId,
+          teacherId: data.teacherId || teacherId
+        });
+      });
+    } catch (err) {
+      console.warn('Query questionSets by ownerId note:', err);
+    }
+
+    if (setMap.size === 0) {
+      // Seed initial sample question sets for this teacher
       for (const sample of SAMPLE_QUESTION_SETS) {
-        const full = { ...sample, teacherId };
-        await setDoc(doc(db, 'questionSets', full.id), full);
-        results.push(full);
+        try {
+          const sampleRef = doc(db, 'questionSets', sample.id);
+          const sampleDoc = await getDoc(sampleRef);
+
+          if (!sampleDoc.exists() || !sampleDoc.data()?.ownerId || sampleDoc.data()?.teacherId === teacherId) {
+            const full: QuestionSet = {
+              ...sample,
+              teacherId,
+              ownerId: teacherId,
+              createdAt: sampleDoc.exists() ? (sampleDoc.data()?.createdAt || sample.createdAt) : sample.createdAt,
+              updatedAt: new Date().toISOString()
+            };
+            await setDoc(sampleRef, sanitizeFirestorePayload(full));
+            setMap.set(sample.id, full);
+          } else {
+            const personalId = `${sample.id}_${teacherId.slice(0, 8)}`;
+            const full: QuestionSet = {
+              ...sample,
+              id: personalId,
+              teacherId,
+              ownerId: teacherId,
+              updatedAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'questionSets', personalId), sanitizeFirestorePayload(full));
+            setMap.set(personalId, full);
+          }
+        } catch (e) {
+          console.warn('Could not seed question set document:', sample.id, e);
+          setMap.set(sample.id, { ...sample, teacherId, ownerId: teacherId });
+        }
       }
     }
-    return results;
+
+    const results = Array.from(setMap.values());
+    return results.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   } catch (err) {
     console.warn('Fallback loading question sets:', err);
-    return SAMPLE_QUESTION_SETS.map(s => ({ ...s, teacherId }));
+    return SAMPLE_QUESTION_SETS.map(s => ({ ...s, teacherId, ownerId: teacherId }));
   }
 }
 
 export async function saveQuestionSet(qSet: QuestionSet): Promise<void> {
   try {
-    await setDoc(doc(db, 'questionSets', qSet.id), qSet);
+    const canonicalOwner = qSet.ownerId || qSet.teacherId;
+    const payload: QuestionSet = sanitizeFirestorePayload({
+      ...qSet,
+      ownerId: canonicalOwner,
+      teacherId: canonicalOwner,
+      questionCount: qSet.questions?.length ?? qSet.questionCount ?? 0,
+      updatedAt: new Date().toISOString()
+    });
+    await setDoc(doc(db, 'questionSets', qSet.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `questionSets/${qSet.id}`);
   }

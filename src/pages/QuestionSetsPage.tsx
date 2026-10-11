@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { QuestionSet, Question, Quiz } from '../types';
 import { getTeacherQuestionSets, saveQuestionSet, deleteQuestionSet, saveQuiz } from '../lib/dbService';
+import { getSafeFirestoreErrorMessage } from '../lib/firebase';
 
 interface QuestionSetsPageProps {
   onNavigate: (path: string) => void;
@@ -53,8 +54,9 @@ export const QuestionSetsPage: React.FC<QuestionSetsPageProps> = ({ onNavigate }
     const newSet: QuestionSet = {
       id: `qset_${Date.now()}`,
       teacherId,
+      ownerId: teacherId,
       title: newTitle.trim(),
-      subject: newSubject.trim(),
+      subject: newSubject.trim() || 'General',
       description: newDescription.trim(),
       questionCount: 0,
       questions: [],
@@ -70,8 +72,8 @@ export const QuestionSetsPage: React.FC<QuestionSetsPageProps> = ({ onNavigate }
       setNewTitle('');
       setNewDescription('');
       toast.success('Question set pool created!');
-    } catch {
-      toast.error('Could not save question set.');
+    } catch (err) {
+      toast.error(getSafeFirestoreErrorMessage(err));
     }
   };
 
@@ -83,8 +85,29 @@ export const QuestionSetsPage: React.FC<QuestionSetsPageProps> = ({ onNavigate }
       setSets(remaining);
       setSelectedSet(remaining[0] || null);
       toast.info('Question set deleted.');
-    } catch {
-      toast.error('Failed to delete question set.');
+    } catch (err) {
+      toast.error(getSafeFirestoreErrorMessage(err));
+    }
+  };
+
+  const handleDeleteQuestionFromSet = async (qIndex: number) => {
+    if (!selectedSet || !selectedSet.questions) return;
+    const updatedQuestions = selectedSet.questions.filter((_, idx) => idx !== qIndex);
+    const updatedSet: QuestionSet = {
+      ...selectedSet,
+      ownerId: selectedSet.ownerId || teacherId,
+      teacherId: selectedSet.teacherId || teacherId,
+      questions: updatedQuestions,
+      questionCount: updatedQuestions.length,
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await saveQuestionSet(updatedSet);
+      setSelectedSet(updatedSet);
+      setSets(sets.map((s) => (s.id === updatedSet.id ? updatedSet : s)));
+      toast.info('Question removed from pool.');
+    } catch (err) {
+      toast.error(getSafeFirestoreErrorMessage(err));
     }
   };
 
@@ -97,6 +120,7 @@ export const QuestionSetsPage: React.FC<QuestionSetsPageProps> = ({ onNavigate }
     const newQuizId = `quiz_${Date.now()}`;
     const newQuiz: Quiz = {
       id: newQuizId,
+      ownerId: teacherId,
       teacherId,
       title: `Quiz: ${qSet.title}`,
       description: `Generated from question pool: ${qSet.description || qSet.title}`,
@@ -114,8 +138,8 @@ export const QuestionSetsPage: React.FC<QuestionSetsPageProps> = ({ onNavigate }
       await saveQuiz(newQuiz);
       toast.success('Converted into a live quiz! Opening editor...');
       onNavigate(`/dashboard/quizzes/${newQuizId}`);
-    } catch {
-      toast.error('Failed to convert into quiz.');
+    } catch (err) {
+      toast.error(getSafeFirestoreErrorMessage(err));
     }
   };
 
@@ -314,10 +338,20 @@ export const QuestionSetsPage: React.FC<QuestionSetsPageProps> = ({ onNavigate }
                     {selectedSet.questions.map((q, idx) => (
                       <div key={q.id || idx} className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50">
                         <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-bold text-violet-700">Question {idx + 1}</span>
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                            Key: Option {q.correctAnswer}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-violet-700">Question {idx + 1}</span>
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                              Key: Option {q.correctAnswer}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteQuestionFromSet(idx)}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                            title="Remove question from pool"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                         <p className="text-xs font-bold text-slate-900 mb-2">{q.text}</p>
                         <div className="grid grid-cols-2 gap-2 text-xs">

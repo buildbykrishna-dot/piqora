@@ -92,11 +92,17 @@ export function downloadExcelTemplate(): void {
   XLSX.writeFile(workbook, 'piqora_questions_template.xlsx');
 }
 
-// Normalize and find column value case-insensitively
+// Normalize key by stripping non-alphanumeric chars and lowercasing
+function normalizeHeaderKey(key: string): string {
+  return String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Normalize and find column value case-insensitively with flexible aliases
 function findColumnValue(row: Record<string, any>, possibleNames: string[]): string {
-  const keys = Object.keys(row);
+  const rowKeys = Object.keys(row);
   for (const name of possibleNames) {
-    const matchedKey = keys.find(k => k.trim().toLowerCase() === name.toLowerCase());
+    const targetNorm = normalizeHeaderKey(name);
+    const matchedKey = rowKeys.find(k => normalizeHeaderKey(k) === targetNorm);
     if (matchedKey && row[matchedKey] !== undefined && row[matchedKey] !== null) {
       return String(row[matchedKey]).trim();
     }
@@ -110,22 +116,31 @@ export function parseAndValidateRawData(rawRows: Record<string, any>[]): Importe
   const seenTexts = new Set<string>();
 
   rawRows.forEach((row, index) => {
+    // Check if the row has any content at all
+    const hasAnyContent = Object.values(row).some(
+      val => val !== null && val !== undefined && String(val).trim() !== ''
+    );
+    if (!hasAnyContent) {
+      // Completely empty row, skip without registering an error
+      return;
+    }
+
     const rowNumber = index + 2; // account for header row
     const errors: string[] = [];
 
-    const text = findColumnValue(row, ['Question', 'Question Text', 'Prompt', 'Q']);
-    const optA = findColumnValue(row, ['Option A', 'Option 1', 'Choice A', 'A']);
-    const optB = findColumnValue(row, ['Option B', 'Option 2', 'Choice B', 'B']);
-    const optC = findColumnValue(row, ['Option C', 'Option 3', 'Choice C', 'C']);
-    const optD = findColumnValue(row, ['Option D', 'Option 4', 'Choice D', 'D']);
-    const rawAnswer = findColumnValue(row, ['Correct Answer', 'Answer', 'Correct', 'Key']);
-    const rawTime = findColumnValue(row, ['Time Limit', 'Time', 'Duration', 'Seconds']);
-    const rawPoints = findColumnValue(row, ['Points', 'Score', 'Marks']);
-    const explanation = findColumnValue(row, ['Explanation', 'Notes', 'Reason']);
+    const text = findColumnValue(row, ['Question', 'Question Text', 'Prompt', 'Question Prompt', 'Q', 'Title']);
+    const optA = findColumnValue(row, ['Option A', 'Option 1', 'Choice A', 'Choice 1', 'OptionA', 'A']);
+    const optB = findColumnValue(row, ['Option B', 'Option 2', 'Choice B', 'Choice 2', 'OptionB', 'B']);
+    const optC = findColumnValue(row, ['Option C', 'Option 3', 'Choice C', 'Choice 3', 'OptionC', 'C']);
+    const optD = findColumnValue(row, ['Option D', 'Option 4', 'Choice D', 'Choice 4', 'OptionD', 'D']);
+    const rawAnswer = findColumnValue(row, ['Correct Answer', 'Correct Option', 'Answer', 'Correct', 'Key', 'Ans', 'Correct Answer A B C D']);
+    const rawTime = findColumnValue(row, ['Time Limit', 'Time', 'Duration', 'Seconds', 'Time s', 'Timer']);
+    const rawPoints = findColumnValue(row, ['Points', 'Score', 'Marks', 'Point Value']);
+    const explanation = findColumnValue(row, ['Explanation', 'Notes', 'Reason', 'Rationale', 'Solution', 'Description']);
 
     // Check required Question Text
     if (!text) {
-      errors.push('Question text is empty');
+      errors.push('Question prompt is empty');
     } else if (seenTexts.has(text.toLowerCase())) {
       errors.push('Duplicate question detected in spreadsheet');
     } else {
@@ -138,21 +153,27 @@ export function parseAndValidateRawData(rawRows: Record<string, any>[]): Importe
     if (!optC) errors.push('Option C is missing');
     if (!optD) errors.push('Option D is missing');
 
-    // Parse Correct Answer (accept A/B/C/D or text match)
+    // Parse Correct Answer (accept A/B/C/D, 1/2/3/4, or text match)
     let parsedAnswer: OptionLetter | null = null;
-    const cleanAns = rawAnswer.trim().toUpperCase();
-    if (cleanAns === 'A' || cleanAns === '1') parsedAnswer = 'A';
-    else if (cleanAns === 'B' || cleanAns === '2') parsedAnswer = 'B';
-    else if (cleanAns === 'C' || cleanAns === '3') parsedAnswer = 'C';
-    else if (cleanAns === 'D' || cleanAns === '4') parsedAnswer = 'D';
-    else if (cleanAns) {
-      // Check if text exactly matches one of the options
-      if (optA && cleanAns === optA.toUpperCase()) parsedAnswer = 'A';
-      else if (optB && cleanAns === optB.toUpperCase()) parsedAnswer = 'B';
-      else if (optC && cleanAns === optC.toUpperCase()) parsedAnswer = 'C';
-      else if (optD && cleanAns === optD.toUpperCase()) parsedAnswer = 'D';
+    const cleanAns = rawAnswer.trim();
+    const upperAns = cleanAns.toUpperCase();
+
+    if (upperAns === 'A' || upperAns === 'OPTION A' || upperAns === 'OPTION 1' || upperAns === 'CHOICE A' || upperAns === '1') {
+      parsedAnswer = 'A';
+    } else if (upperAns === 'B' || upperAns === 'OPTION B' || upperAns === 'OPTION 2' || upperAns === 'CHOICE B' || upperAns === '2') {
+      parsedAnswer = 'B';
+    } else if (upperAns === 'C' || upperAns === 'OPTION C' || upperAns === 'OPTION 3' || upperAns === 'CHOICE C' || upperAns === '3') {
+      parsedAnswer = 'C';
+    } else if (upperAns === 'D' || upperAns === 'OPTION D' || upperAns === 'OPTION 4' || upperAns === 'CHOICE D' || upperAns === '4') {
+      parsedAnswer = 'D';
+    } else if (cleanAns) {
+      // Check if text matches one of the options case-insensitively
+      if (optA && cleanAns.toLowerCase() === optA.toLowerCase()) parsedAnswer = 'A';
+      else if (optB && cleanAns.toLowerCase() === optB.toLowerCase()) parsedAnswer = 'B';
+      else if (optC && cleanAns.toLowerCase() === optC.toLowerCase()) parsedAnswer = 'C';
+      else if (optD && cleanAns.toLowerCase() === optD.toLowerCase()) parsedAnswer = 'D';
       else {
-        errors.push(`Invalid Correct Answer "${rawAnswer}". Must be A, B, C, or D.`);
+        errors.push(`Invalid Correct Answer "${rawAnswer}". Must be A, B, C, D or match an option.`);
       }
     } else {
       errors.push('Correct Answer is not specified');
@@ -185,7 +206,7 @@ export function parseAndValidateRawData(rawRows: Record<string, any>[]): Importe
       correctAnswer: parsedAnswer,
       timeLimit,
       points,
-      explanation,
+      explanation: explanation || '',
       isValid: errors.length === 0,
       errors
     });
@@ -199,13 +220,13 @@ export function convertImportedRowsToQuestions(rows: ImportedQuestionRow[]): Que
   return rows
     .filter(r => r.isValid && r.correctAnswer)
     .map((r, index) => ({
-      id: `imp_q_${Date.now()}_${index}`,
-      text: r.text,
-      options: [r.optionA, r.optionB, r.optionC, r.optionD],
+      id: `imp_q_${Date.now()}_${index + 1}`,
+      text: r.text.trim(),
+      options: [r.optionA.trim(), r.optionB.trim(), r.optionC.trim(), r.optionD.trim()],
       correctAnswer: r.correctAnswer as OptionLetter,
-      explanation: r.explanation || undefined,
-      timeLimit: r.timeLimit || 20,
-      points: r.points || 1000,
+      explanation: (r.explanation || '').trim(),
+      timeLimit: typeof r.timeLimit === 'number' && r.timeLimit > 0 ? r.timeLimit : 20,
+      points: typeof r.points === 'number' && r.points >= 0 ? r.points : 1000,
       order: index + 1
     }));
 }

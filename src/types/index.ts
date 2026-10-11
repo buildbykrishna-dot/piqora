@@ -32,6 +32,7 @@ export interface Quiz {
 export interface QuestionSet {
   id: string;
   teacherId: string;
+  ownerId?: string;
   title: string;
   description: string;
   subject: string;

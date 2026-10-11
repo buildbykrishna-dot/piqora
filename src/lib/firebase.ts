@@ -34,25 +34,83 @@ export interface FirestoreErrorInfo {
   };
 }
 
+/**
+ * Deeply sanitizes an object before writing to Firestore.
+ * Strips all `undefined` fields recursively so Firestore setDoc/updateDoc never errors.
+ */
+export function sanitizeFirestorePayload<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeFirestorePayload(item)) as unknown as T;
+  }
+  if (typeof obj === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (val !== undefined) {
+        cleaned[key] = sanitizeFirestorePayload(val);
+      }
+    }
+    return cleaned as T;
+  }
+  return obj;
+}
+
+/**
+ * Extracts a safe, human-readable user message from any Firestore error.
+ * Never leaks raw authentication payloads, tokens, passwords, or internal JSON dumps.
+ */
+export function getSafeFirestoreErrorMessage(error: unknown): string {
+  if (!error) return 'An unexpected error occurred. Please try again.';
+  
+  let rawMsg = error instanceof Error ? error.message : String(error);
+  
+  // If the message is wrapped in a stringified JSON payload, unwrap it
+  try {
+    if (rawMsg.startsWith('{') && rawMsg.includes('"error"')) {
+      const parsed = JSON.parse(rawMsg);
+      rawMsg = parsed.error || rawMsg;
+    }
+  } catch {}
+
+  const lower = (rawMsg + ' ' + (typeof (error as any)?.code === 'string' ? (error as any).code : '')).toLowerCase();
+
+  if (lower.includes('permission-denied') || lower.includes('insufficient permissions')) {
+    return "You don't have permission to edit or save this content.";
+  }
+  if (lower.includes('unsupported field value: undefined')) {
+    return 'Invalid form data: blank or undefined values are not permitted.';
+  }
+  if (lower.includes('not-found')) {
+    return 'The requested document was not found.';
+  }
+  if (lower.includes('unavailable') || lower.includes('offline') || lower.includes('network')) {
+    return 'Network connection issue. Please check your internet connection.';
+  }
+  if (lower.includes('already-exists')) {
+    return 'An item with this ID already exists.';
+  }
+  return 'Unable to save changes. Please try again.';
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  const rawMsg = error instanceof Error ? error.message : String(error);
+  const code = (error as any)?.code || 'unknown';
+
+  // Log clean diagnostic details during development without passwords or sensitive credentials
+  console.error(`[Firestore ${operationType.toUpperCase()}] Error at ${path}:`, {
+    code,
+    message: rawMsg,
+    path,
+    userId: auth.currentUser?.uid || 'anonymous'
+  });
+
+  const safeMessage = getSafeFirestoreErrorMessage(error);
+  const safeErr = new Error(safeMessage);
+  (safeErr as any).code = code;
+  (safeErr as any).originalMessage = rawMsg;
+  throw safeErr;
 }
 
 // Initial connection test

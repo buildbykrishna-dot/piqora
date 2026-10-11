@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Quiz, Question, OptionLetter } from '../types';
 import { getQuizById, saveQuiz, deleteQuiz } from '../lib/dbService';
+import { getSafeFirestoreErrorMessage } from '../lib/firebase';
 
 interface QuizEditorPageProps {
   quizId?: string; // If 'new' or undefined, create fresh
@@ -212,6 +213,7 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       ...q,
       id: q.id || `q_${Date.now()}_${idx + 1}`,
       order: idx + 1,
+      explanation: (q.explanation || '').trim(),
       timeLimit: typeof q.timeLimit === 'number' && !isNaN(q.timeLimit) && q.timeLimit > 0 ? q.timeLimit : 20,
       points: typeof q.points === 'number' && !isNaN(q.points) ? q.points : 1000
     }));
@@ -227,7 +229,7 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       title: title.trim() || 'Untitled College Quiz',
       description: description.trim(),
       subject: subject.trim() || 'General',
-      courseLabel: courseLabel.trim() || undefined,
+      courseLabel: courseLabel.trim() || '',
       coverColor,
       tags,
       isPublished: publishState,
@@ -262,7 +264,8 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       toast.success('Changes saved successfully.');
     } catch (err: any) {
       console.error('Failed to save quiz changes:', err);
-      toast.error(err?.message ? `Failed to save changes: ${err.message}` : 'Failed to save changes. Unsaved edits were preserved.');
+      const safeMsg = getSafeFirestoreErrorMessage(err);
+      toast.error(safeMsg || 'Unable to save changes. Please try again.');
     } finally {
       setSaving(false);
       setSavingAction(null);
@@ -289,7 +292,8 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       onNavigate('/dashboard/content');
     } catch (err: any) {
       console.error('Failed to publish quiz:', err);
-      toast.error(err?.message ? `Failed to publish quiz: ${err.message}` : 'Failed to publish quiz. Please try again.');
+      const safeMsg = getSafeFirestoreErrorMessage(err);
+      toast.error(safeMsg || 'Failed to publish quiz. Please try again.');
     } finally {
       setSaving(false);
       setSavingAction(null);
