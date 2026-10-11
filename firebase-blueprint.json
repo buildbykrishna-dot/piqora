@@ -23,6 +23,7 @@
       "properties": {
         "id": { "type": "string" },
         "teacherId": { "type": "string" },
+        "ownerId": { "type": "string", "description": "Teacher Firebase Auth UID owner" },
         "title": { "type": "string", "maxLength": 150 },
         "description": { "type": "string", "maxLength": 1000 },
         "subject": { "type": "string", "maxLength": 100 },

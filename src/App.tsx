@@ -8,7 +8,6 @@ import { DashboardOverview } from './pages/DashboardOverview';
 import { ContentPage } from './pages/ContentPage';
 import { QuizEditorPage } from './pages/QuizEditorPage';
 import { QuestionSetsPage } from './pages/QuestionSetsPage';
-import { LessonsPage } from './pages/LessonsPage';
 import { ImportPage } from './pages/ImportPage';
 import { TemplatesPage } from './pages/TemplatesPage';
 import { SessionsPage } from './pages/SessionsPage';
@@ -58,16 +57,13 @@ function MainRouter() {
     window.scrollTo(0, 0);
   };
 
-  const handleSelectCreateOption = (opt: 'quiz' | 'question-set' | 'lesson' | 'import') => {
+  const handleSelectCreateOption = (opt: 'quiz' | 'question-set' | 'import') => {
     switch (opt) {
       case 'quiz':
         navigate('/dashboard/quizzes/new');
         break;
       case 'question-set':
         navigate('/dashboard/question-sets');
-        break;
-      case 'lesson':
-        navigate('/dashboard/lessons');
         break;
       case 'import':
         navigate('/dashboard/import');
@@ -155,10 +151,9 @@ function MainRouter() {
   }
 
   let pageTitle = 'Dashboard';
-  if (currentPath === '/dashboard/content') pageTitle = 'My Content & Quizzes';
+  if (currentPath === '/dashboard/content' || currentPath === '/dashboard/lessons') pageTitle = 'My Content & Quizzes';
   else if (currentPath.startsWith('/dashboard/quizzes/')) pageTitle = 'Quiz Editor';
   else if (currentPath === '/dashboard/question-sets') pageTitle = 'Question Bank';
-  else if (currentPath === '/dashboard/lessons') pageTitle = 'Revision Lessons';
   else if (currentPath === '/dashboard/import') pageTitle = 'Spreadsheet Import';
   else if (currentPath === '/dashboard/templates') pageTitle = 'Download Templates';
   else if (currentPath === '/dashboard/sessions') pageTitle = 'Live & Past Sessions';
@@ -176,7 +171,7 @@ function MainRouter() {
         />
       );
     }
-    if (currentPath === '/dashboard/content') {
+    if (currentPath === '/dashboard/content' || currentPath === '/dashboard/lessons') {
       return (
         <ContentPage
           onNavigate={navigate}
@@ -191,9 +186,6 @@ function MainRouter() {
     }
     if (currentPath === '/dashboard/question-sets') {
       return <QuestionSetsPage onNavigate={navigate} />;
-    }
-    if (currentPath === '/dashboard/lessons') {
-      return <LessonsPage onNavigate={navigate} />;
     }
     if (currentPath === '/dashboard/import') {
       return <ImportPage onNavigate={navigate} />;

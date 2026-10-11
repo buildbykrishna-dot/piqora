@@ -9,7 +9,6 @@ import {
   Plus, 
   ArrowRight, 
   FolderPlus, 
-  BookOpen, 
   Clock, 
   CheckCircle2,
   Calendar,
@@ -310,22 +309,6 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                   <div>
                     <p className="text-xs font-bold text-slate-900 group-hover:text-violet-700">Question Bank</p>
                     <p className="text-[11px] text-slate-500">Manage modular question pools</p>
-                  </div>
-                </div>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-violet-600" />
-              </button>
-
-              <button
-                onClick={() => onNavigate('/dashboard/lessons')}
-                className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-violet-50/50 border border-slate-100 hover:border-violet-200 transition-all text-left cursor-pointer group"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-amber-100 text-amber-700">
-                    <BookOpen className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-900 group-hover:text-violet-700">Revision Lessons</p>
-                    <p className="text-[11px] text-slate-500">Create notes with external links</p>
                   </div>
                 </div>
                 <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-violet-600" />

@@ -25,6 +25,22 @@ service cloud.firestore {
         );
     }
 
+    // Helper to verify quiz ownership across both ownerId and legacy teacherId fields
+    function isQuizOwner(quizData) {
+      return isSignedIn() && (
+        ('ownerId' in quizData && quizData.ownerId == request.auth.uid) ||
+        ('teacherId' in quizData && quizData.teacherId == request.auth.uid)
+      );
+    }
+
+    // Controlled migration rule: allows authorized teachers to claim/repair legacy or unowned sample quizzes
+    function canMigrateSampleQuiz(quizData, quizId) {
+      return !('ownerId' in quizData) && (
+        quizId.matches('^sample-.*') || 
+        quizData.isPublic == true
+      );
+    }
+
     // Default deny all unknown paths
     match /{document=**} {
       allow read, write: if false;
@@ -47,32 +63,58 @@ service cloud.firestore {
 
     // Quizzes (Teacher Owned)
     match /quizzes/{quizId} {
-      allow get: if (isSignedIn() && resource.data.teacherId == request.auth.uid) || resource.data.isPublic == true;
-      allow list: if isSignedIn() && (resource.data.teacherId == request.auth.uid || resource.data.isPublic == true);
-      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
-      allow update: if isTeacher() && resource.data.teacherId == request.auth.uid && request.resource.data.teacherId == request.auth.uid;
-      allow delete: if isTeacher() && resource.data.teacherId == request.auth.uid;
+      allow get: if isQuizOwner(resource.data) || resource.data.isPublic == true;
+      allow list: if isSignedIn() && (
+        isQuizOwner(resource.data) || resource.data.isPublic == true
+      );
+      allow create: if isTeacher() && (
+        ('ownerId' in request.resource.data && request.resource.data.ownerId == request.auth.uid) ||
+        ('teacherId' in request.resource.data && request.resource.data.teacherId == request.auth.uid)
+      );
+      allow update: if isTeacher() && 
+        (isQuizOwner(resource.data) || canMigrateSampleQuiz(resource.data, quizId)) &&
+        (!('ownerId' in request.resource.data) || request.resource.data.ownerId == request.auth.uid) &&
+        (!('teacherId' in request.resource.data) || request.resource.data.teacherId == request.auth.uid);
+      allow delete: if isTeacher() && isQuizOwner(resource.data);
 
       match /questions/{questionId} {
         allow read: if isSignedIn();
-        allow write: if isTeacher() && get(/databases/$(database)/documents/quizzes/$(quizId)).data.teacherId == request.auth.uid;
+        allow write: if isTeacher() && isQuizOwner(get(/databases/$(database)/documents/quizzes/$(quizId)).data);
       }
     }
 
     // Question Sets (Reusable Question Bank)
     match /questionSets/{setId} {
-      allow read: if isSignedIn() && resource.data.teacherId == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.teacherId == request.auth.uid;
-      allow create: if isTeacher() && request.resource.data.teacherId == request.auth.uid;
-      allow update: if isTeacher() && resource.data.teacherId == request.auth.uid;
-      allow delete: if isTeacher() && resource.data.teacherId == request.auth.uid;
+      allow read: if isSignedIn() && (
+        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
+        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
+      );
+      allow list: if isSignedIn() && (
+        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
+        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
+      );
+      allow create: if isTeacher() && (
+        ('ownerId' in request.resource.data && request.resource.data.ownerId == request.auth.uid) ||
+        ('teacherId' in request.resource.data && request.resource.data.teacherId == request.auth.uid)
+      );
+      allow update: if isTeacher() && (
+        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
+        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
+      );
+      allow delete: if isTeacher() && (
+        ('ownerId' in resource.data && resource.data.ownerId == request.auth.uid) ||
+        ('teacherId' in resource.data && resource.data.teacherId == request.auth.uid)
+      );
 
       match /questions/{questionId} {
-        allow read, write: if isTeacher() && get(/databases/$(database)/documents/questionSets/$(setId)).data.teacherId == request.auth.uid;
+        allow read, write: if isTeacher() && (
+          ('ownerId' in get(/databases/$(database)/documents/questionSets/$(setId)).data && get(/databases/$(database)/documents/questionSets/$(setId)).data.ownerId == request.auth.uid) ||
+          ('teacherId' in get(/databases/$(database)/documents/questionSets/$(setId)).data && get(/databases/$(database)/documents/questionSets/$(setId)).data.teacherId == request.auth.uid)
+        );
       }
     }
 
-    // Lessons (Revision Resources)
+    // Lessons (Preserved collection rules)
     match /lessons/{lessonId} {
       allow read: if (isSignedIn() && resource.data.teacherId == request.auth.uid) || resource.data.isPublished == true;
       allow list: if isSignedIn() && (resource.data.teacherId == request.auth.uid || resource.data.isPublished == true);

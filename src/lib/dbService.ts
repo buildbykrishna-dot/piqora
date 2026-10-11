@@ -197,24 +197,88 @@ export const SAMPLE_QUESTION_SETS: Omit<QuestionSet, 'teacherId'>[] = [
 
 export async function getTeacherQuizzes(teacherId: string): Promise<Quiz[]> {
   try {
-    const q = query(collection(db, 'quizzes'), where('teacherId', '==', teacherId));
-    const snap = await getDocs(q);
-    const results: Quiz[] = [];
-    snap.forEach((d) => results.push(d.data() as Quiz));
+    const quizMap = new Map<string, Quiz>();
+
+    // 1. Fetch quizzes by teacherId
+    try {
+      const qTeacher = query(collection(db, 'quizzes'), where('teacherId', '==', teacherId));
+      const snapTeacher = await getDocs(qTeacher);
+      snapTeacher.forEach((d) => {
+        const data = d.data() as Quiz;
+        quizMap.set(d.id, {
+          ...data,
+          id: d.id,
+          ownerId: data.ownerId || data.teacherId || teacherId,
+          teacherId: data.teacherId || teacherId
+        });
+      });
+    } catch (err) {
+      console.warn('Query by teacherId note:', err);
+    }
+
+    // 2. Fetch quizzes by ownerId
+    try {
+      const qOwner = query(collection(db, 'quizzes'), where('ownerId', '==', teacherId));
+      const snapOwner = await getDocs(qOwner);
+      snapOwner.forEach((d) => {
+        const data = d.data() as Quiz;
+        quizMap.set(d.id, {
+          ...data,
+          id: d.id,
+          ownerId: data.ownerId || teacherId,
+          teacherId: data.teacherId || teacherId
+        });
+      });
+    } catch (err) {
+      console.warn('Query by ownerId note:', err);
+    }
+
+    const results: Quiz[] = Array.from(quizMap.values());
 
     if (results.length === 0) {
-      // Seed initial sample quizzes for this teacher
+      // Seed initial sample quizzes for this teacher with valid ownership metadata
       for (const sample of SAMPLE_QUIZZES) {
-        const fullQuiz: Quiz = { ...sample, teacherId };
-        await setDoc(doc(db, 'quizzes', fullQuiz.id), fullQuiz);
-        results.push(fullQuiz);
+        try {
+          const sampleRef = doc(db, 'quizzes', sample.id);
+          const sampleDoc = await getDoc(sampleRef);
+
+          if (!sampleDoc.exists() || !sampleDoc.data()?.ownerId || sampleDoc.data()?.teacherId === teacherId) {
+            // Document is missing or unmigrated (lacks canonical ownerId): seed or migrate under sample.id
+            const fullQuiz: Quiz = {
+              ...sample,
+              teacherId,
+              ownerId: teacherId,
+              createdAt: sampleDoc.exists() ? (sampleDoc.data()?.createdAt || sample.createdAt) : sample.createdAt,
+              updatedAt: new Date().toISOString()
+            };
+            await setDoc(sampleRef, fullQuiz);
+            quizMap.set(sample.id, fullQuiz);
+          } else {
+            // Sample quiz is already claimed by another teacher; provision a personal copy
+            const personalId = `${sample.id}_${teacherId.slice(0, 8)}`;
+            const fullQuiz: Quiz = {
+              ...sample,
+              id: personalId,
+              teacherId,
+              ownerId: teacherId,
+              updatedAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'quizzes', personalId), fullQuiz);
+            quizMap.set(personalId, fullQuiz);
+          }
+        } catch (e) {
+          console.warn('Could not seed quiz document:', sample.id, e);
+          quizMap.set(sample.id, { ...sample, teacherId, ownerId: teacherId });
+        }
       }
     }
-    return results.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+    const finalResults = Array.from(quizMap.values());
+    return finalResults.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   } catch (err) {
     console.warn('Fallback loading quizzes:', err);
     // Return sample quizzes if permission issue or offline
-    return SAMPLE_QUIZZES.map(s => ({ ...s, teacherId }));
+    return SAMPLE_QUIZZES.map(s => ({ ...s, teacherId, ownerId: teacherId }));
   }
 }
 
@@ -222,22 +286,35 @@ export async function getQuizById(quizId: string): Promise<Quiz | null> {
   try {
     const snap = await getDoc(doc(db, 'quizzes', quizId));
     if (snap.exists()) {
-      return snap.data() as Quiz;
+      const data = snap.data() as Quiz;
+      return {
+        ...data,
+        id: snap.id,
+        ownerId: data.ownerId || data.teacherId,
+        teacherId: data.teacherId || data.ownerId || 'teacher'
+      };
     }
     // Check sample fallback
     const sample = SAMPLE_QUIZZES.find(s => s.id === quizId);
-    if (sample) return { ...sample, teacherId: 'demo_teacher' };
+    if (sample) return { ...sample, teacherId: 'demo_teacher', ownerId: 'demo_teacher' };
     return null;
   } catch (err) {
     console.warn('Error fetching quiz by ID:', err);
     const sample = SAMPLE_QUIZZES.find(s => s.id === quizId);
-    return sample ? { ...sample, teacherId: 'demo_teacher' } : null;
+    return sample ? { ...sample, teacherId: 'demo_teacher', ownerId: 'demo_teacher' } : null;
   }
 }
 
 export async function saveQuiz(quiz: Quiz): Promise<void> {
   try {
-    await setDoc(doc(db, 'quizzes', quiz.id), quiz);
+    const canonicalOwner = quiz.ownerId || quiz.teacherId;
+    const payload: Quiz = {
+      ...quiz,
+      ownerId: canonicalOwner,
+      teacherId: canonicalOwner,
+      updatedAt: new Date().toISOString()
+    };
+    await setDoc(doc(db, 'quizzes', quiz.id), payload);
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `quizzes/${quiz.id}`);
   }

@@ -3,13 +3,12 @@ import {
   LayoutDashboard, 
   FolderKanban, 
   FolderPlus, 
-  BookOpen, 
   Radio, 
   BarChart3, 
   FileSpreadsheet, 
   Settings, 
   Plus, 
-  X,
+  X, 
   GraduationCap
 } from 'lucide-react';
 
@@ -32,7 +31,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { label: 'Overview', path: '/dashboard', icon: LayoutDashboard },
     { label: 'My Content', path: '/dashboard/content', icon: FolderKanban },
     { label: 'Question Sets', path: '/dashboard/question-sets', icon: FolderPlus },
-    { label: 'Lessons', path: '/dashboard/lessons', icon: BookOpen },
     { label: 'Live Sessions', path: '/dashboard/sessions', icon: Radio },
     { label: 'Reports', path: '/dashboard/reports', icon: BarChart3 },
     { label: 'Templates', path: '/dashboard/templates', icon: FileSpreadsheet },

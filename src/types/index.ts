@@ -14,6 +14,7 @@ export interface Question {
 export interface Quiz {
   id: string;
   teacherId: string;
+  ownerId?: string;
   title: string;
   description: string;
   subject: string;

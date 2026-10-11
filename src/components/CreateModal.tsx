@@ -3,7 +3,6 @@ import {
   X, 
   Sparkles, 
   FolderPlus, 
-  BookOpen, 
   FileSpreadsheet, 
   ArrowRight,
   GraduationCap
@@ -12,7 +11,7 @@ import {
 interface CreateModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectOption: (option: 'quiz' | 'question-set' | 'lesson' | 'import') => void;
+  onSelectOption: (option: 'quiz' | 'question-set' | 'import') => void;
 }
 
 export const CreateModal: React.FC<CreateModalProps> = ({ isOpen, onClose, onSelectOption }) => {
@@ -36,15 +35,6 @@ export const CreateModal: React.FC<CreateModalProps> = ({ isOpen, onClose, onSel
       icon: FolderPlus,
       color: 'bg-indigo-50 text-indigo-600 border-indigo-200 group-hover:bg-indigo-600 group-hover:text-white',
       badge: 'Curriculum Pool'
-    },
-    {
-      id: 'lesson' as const,
-      title: 'Lesson',
-      subtitle: 'Interactive Revision Resource',
-      description: 'Create concise revision notes, conceptual explanations, lecture highlights, and learning links for your students.',
-      icon: BookOpen,
-      color: 'bg-amber-50 text-amber-600 border-amber-200 group-hover:bg-amber-600 group-hover:text-white',
-      badge: 'Study Material'
     },
     {
       id: 'import' as const,

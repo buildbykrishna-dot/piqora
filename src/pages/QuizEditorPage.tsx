@@ -216,10 +216,14 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       points: typeof q.points === 'number' && !isNaN(q.points) ? q.points : 1000
     }));
 
+    const currentUid = user?.uid || teacherId;
+    const resolvedOwnerId = currentUid;
+
     return {
       ...(existingQuiz || {}),
       id: currentQuizId,
-      teacherId: user?.uid || existingQuiz?.teacherId || teacherId,
+      ownerId: resolvedOwnerId,
+      teacherId: resolvedOwnerId,
       title: title.trim() || 'Untitled College Quiz',
       description: description.trim(),
       subject: subject.trim() || 'General',
