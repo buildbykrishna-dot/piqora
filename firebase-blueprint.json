@@ -50,7 +50,9 @@
         "explanation": { "type": "string", "maxLength": 500 },
         "timeLimit": { "type": "number" },
         "points": { "type": "number" },
-        "order": { "type": "number" }
+        "order": { "type": "number" },
+        "autoAdvanceEnabled": { "type": "boolean", "description": "Whether to auto advance to reveal and next question" },
+        "revealDurationSeconds": { "type": "number", "description": "Duration in seconds to display reveal before next question" }
       },
       "required": ["id", "quizId", "text", "options", "correctAnswer"]
     },
@@ -101,6 +103,9 @@
         "status": { "type": "string", "enum": ["waiting", "question", "reveal", "leaderboard", "finished"] },
         "currentQuestionIndex": { "type": "number" },
         "questionStartedAt": { "type": "number" },
+        "questionEndsAt": { "type": "number" },
+        "revealEndsAt": { "type": "number" },
+        "transitionToken": { "type": "string" },
         "totalQuestions": { "type": "number" },
         "participantCount": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },

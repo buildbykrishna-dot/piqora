@@ -14,7 +14,9 @@ import {
   AlertCircle,
   HelpCircle,
   Tag,
-  Palette
+  Palette,
+  Play,
+  Zap
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -56,7 +58,9 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       explanation: '',
       timeLimit: 20,
       points: 1000,
-      order: 1
+      order: 1,
+      autoAdvanceEnabled: false,
+      revealDurationSeconds: 5
     }
   ]);
   const [activeQIndex, setActiveQIndex] = useState(0);
@@ -87,7 +91,9 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
                 id: q.id || `q_${Date.now()}_${idx + 1}`,
                 order: idx + 1,
                 timeLimit: typeof q.timeLimit === 'number' && q.timeLimit > 0 ? q.timeLimit : 20,
-                points: typeof q.points === 'number' ? q.points : 1000
+                points: typeof q.points === 'number' ? q.points : 1000,
+                autoAdvanceEnabled: q.autoAdvanceEnabled ?? false,
+                revealDurationSeconds: typeof q.revealDurationSeconds === 'number' && q.revealDurationSeconds > 0 ? q.revealDurationSeconds : 5
               }));
               setQuestions(mapped);
             }
@@ -133,7 +139,9 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       explanation: '',
       timeLimit: 20,
       points: 1000,
-      order: questions.length + 1
+      order: questions.length + 1,
+      autoAdvanceEnabled: false,
+      revealDurationSeconds: 5
     };
     setQuestions((prev) => [...prev, newQ]);
     setActiveQIndex(questions.length);
@@ -146,7 +154,9 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       id: `q_${Date.now()}_dupe`,
       order: questions.length + 1,
       timeLimit: target.timeLimit ?? 20,
-      points: target.points ?? 1000
+      points: target.points ?? 1000,
+      autoAdvanceEnabled: target.autoAdvanceEnabled ?? false,
+      revealDurationSeconds: target.revealDurationSeconds ?? 5
     };
     setQuestions((prev) => [...prev, dupe]);
     setActiveQIndex(questions.length);
@@ -215,7 +225,11 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       order: idx + 1,
       explanation: (q.explanation || '').trim(),
       timeLimit: typeof q.timeLimit === 'number' && !isNaN(q.timeLimit) && q.timeLimit > 0 ? q.timeLimit : 20,
-      points: typeof q.points === 'number' && !isNaN(q.points) ? q.points : 1000
+      points: typeof q.points === 'number' && !isNaN(q.points) ? q.points : 1000,
+      autoAdvanceEnabled: Boolean(q.autoAdvanceEnabled),
+      revealDurationSeconds: typeof q.revealDurationSeconds === 'number' && !isNaN(q.revealDurationSeconds) && q.revealDurationSeconds > 0
+        ? q.revealDurationSeconds
+        : 5
     }));
 
     const currentUid = user?.uid || teacherId;
@@ -515,9 +529,16 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
                     {q.text.trim() || 'Empty question prompt...'}
                   </p>
                   <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 font-medium">
-                    <span className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-slate-700">
-                      Key: {q.correctAnswer}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-slate-700">
+                        Key: {q.correctAnswer}
+                      </span>
+                      {q.autoAdvanceEnabled && (
+                        <span className="bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5 text-[9px]">
+                          <Zap className="w-2.5 h-2.5" /> Auto {q.revealDurationSeconds || 5}s
+                        </span>
+                      )}
+                    </div>
                     <span className="text-amber-600 font-bold">{q.points ?? 1000} pts</span>
                   </div>
                 </div>
@@ -561,7 +582,7 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
                 </button>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center flex-wrap gap-2.5 sm:gap-3">
                 {/* Time Limit dropdown */}
                 <div className="flex items-center gap-1.5 text-xs text-slate-700">
                   <Clock className="w-4 h-4 text-violet-600" />
@@ -595,6 +616,83 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
                     ))}
                   </select>
                 </div>
+
+                {/* Auto-Advance Setting */}
+                <div className="flex items-center gap-1.5 text-xs text-slate-700 bg-violet-50/50 px-2 py-0.5 rounded-lg border border-violet-100">
+                  <Zap className="w-3.5 h-3.5 text-violet-600" />
+                  <span className="font-bold text-slate-700">Auto-Advance:</span>
+                  <select
+                    value={activeQuestion.autoAdvanceEnabled ? 'on' : 'off'}
+                    onChange={(e) => {
+                      const enabled = e.target.value === 'on';
+                      updateActiveQuestion({
+                        autoAdvanceEnabled: enabled,
+                        revealDurationSeconds: enabled ? (activeQuestion.revealDurationSeconds || 5) : activeQuestion.revealDurationSeconds
+                      });
+                    }}
+                    className={`px-2 py-0.5 rounded text-xs font-bold focus:outline-none cursor-pointer border ${
+                      activeQuestion.autoAdvanceEnabled
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                        : 'bg-white text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <option value="off">Off (Manual)</option>
+                    <option value="on">On (Auto)</option>
+                  </select>
+                </div>
+
+                {/* Reveal Duration Setting (Active when Auto-Advance is enabled) */}
+                {activeQuestion.autoAdvanceEnabled && (
+                  <div className="flex items-center gap-1.5 text-xs text-slate-700 bg-emerald-50/60 px-2 py-0.5 rounded-lg border border-emerald-200 animate-in fade-in duration-150">
+                    <span className="font-bold text-emerald-800">Reveal:</span>
+                    <select
+                      value={
+                        [3, 5, 10, 15].includes(activeQuestion.revealDurationSeconds || 5)
+                          ? String(activeQuestion.revealDurationSeconds || 5)
+                          : 'custom'
+                      }
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'custom') {
+                          // Prompt or default to 7 if not set
+                          const cur = activeQuestion.revealDurationSeconds || 5;
+                          const nextVal = [3, 5, 10, 15].includes(cur) ? 7 : cur;
+                          updateActiveQuestion({ revealDurationSeconds: nextVal });
+                        } else {
+                          updateActiveQuestion({ revealDurationSeconds: Math.max(1, parseInt(val, 10)) });
+                        }
+                      }}
+                      className="px-2 py-0.5 bg-white border border-emerald-300 rounded text-xs font-bold text-emerald-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+                    >
+                      <option value="3">3 seconds</option>
+                      <option value="5">5 seconds (Standard)</option>
+                      <option value="10">10 seconds</option>
+                      <option value="15">15 seconds</option>
+                      <option value="custom">Custom...</option>
+                    </select>
+
+                    {/* Custom duration number input */}
+                    {(![3, 5, 10, 15].includes(activeQuestion.revealDurationSeconds || 5) || false) && (
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={1}
+                          max={120}
+                          value={activeQuestion.revealDurationSeconds || 7}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val) && val > 0) {
+                              updateActiveQuestion({ revealDurationSeconds: Math.min(120, val) });
+                            }
+                          }}
+                          className="w-14 px-1.5 py-0.5 text-xs font-mono font-bold bg-white border border-emerald-300 rounded text-center focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          placeholder="secs"
+                        />
+                        <span className="text-[11px] font-bold text-emerald-800">s</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <button
                   onClick={() => handleDuplicateQuestion(activeQIndex)}

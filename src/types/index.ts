@@ -9,6 +9,8 @@ export interface Question {
   timeLimit: number; // in seconds, default 20
   points: number; // default 1000
   order: number;
+  autoAdvanceEnabled?: boolean; // Automatic progression toggle
+  revealDurationSeconds?: number; // Duration in seconds to show correct answer & stats before auto-advancing (default 5s)
 }
 
 export interface Quiz {
@@ -71,6 +73,9 @@ export interface QuizSession {
   status: QuizSessionStatus;
   currentQuestionIndex: number;
   questionStartedAt: number;
+  questionEndsAt?: number; // Authoritative timestamp when current question timer expires
+  revealEndsAt?: number; // Authoritative timestamp when answer reveal ends for auto-advance
+  transitionToken?: string; // Concurrency-safe token to ensure exactly-once advance transitions
   totalQuestions: number;
   participantCount: number;
   questionsSnapshot: Question[];

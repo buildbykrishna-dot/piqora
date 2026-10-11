@@ -10,6 +10,7 @@ import {
   where, 
   orderBy, 
   onSnapshot,
+  runTransaction,
   Timestamp 
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, sanitizeFirestorePayload } from './firebase';
@@ -504,7 +505,9 @@ export async function createLiveSession(quizInput: Quiz, teacherId: string): Pro
     ...q,
     order: q.order || idx + 1,
     timeLimit: typeof q.timeLimit === 'number' && q.timeLimit > 0 ? q.timeLimit : 20,
-    points: typeof q.points === 'number' ? q.points : 1000
+    points: typeof q.points === 'number' ? q.points : 1000,
+    autoAdvanceEnabled: q.autoAdvanceEnabled ?? false,
+    revealDurationSeconds: typeof q.revealDurationSeconds === 'number' && q.revealDurationSeconds > 0 ? q.revealDurationSeconds : 5
   }));
 
   const newSession: QuizSession = {
@@ -636,10 +639,22 @@ export async function submitStudentAnswer(
   const currentQ = session.questionsSnapshot[questionIndex];
   if (!currentQ) return { isCorrect: false, pointsAwarded: 0 };
 
+  // Guard: stop accepting answers if question is not in active 'question' phase
+  if (session.status !== 'question') {
+    return { isCorrect: false, pointsAwarded: 0 };
+  }
+
+  // Guard: stop accepting answers if authoritative timer expired
+  const now = Date.now();
+  if (session.questionEndsAt && now > session.questionEndsAt + 1500) {
+    // Grace period of 1.5s for network jitter, otherwise reject late submission
+    return { isCorrect: false, pointsAwarded: 0 };
+  }
+
   const isCorrect = currentQ.correctAnswer === selectedOption;
   const timeLimitSeconds = typeof currentQ.timeLimit === 'number' && currentQ.timeLimit > 0 ? currentQ.timeLimit : 20;
   const timeLimitMs = timeLimitSeconds * 1000;
-  const responseTimeMs = Math.max(100, Date.now() - (session.questionStartedAt || Date.now()));
+  const responseTimeMs = Math.max(100, Math.min(timeLimitMs, now - (session.questionStartedAt || now)));
   
   // Authoritative Kahoot-style scoring algorithm:
   // Base points * (1 - (responseTime / 2 * timeLimit))
@@ -695,26 +710,68 @@ export async function submitStudentAnswer(
 export async function advanceSessionState(
   sessionId: string, 
   newStatus: QuizSession['status'], 
-  newIndex?: number
-): Promise<void> {
+  newIndex?: number,
+  expectedStatus?: QuizSession['status'],
+  expectedIndex?: number
+): Promise<boolean> {
+  const sessionRef = doc(db, 'quizSessions', sessionId);
+
   try {
-    const updatePayload: Partial<QuizSession> = {
-      status: newStatus,
-      updatedAt: new Date().toISOString()
-    };
-
-    if (newStatus === 'question') {
-      updatePayload.questionStartedAt = Date.now();
-      if (typeof newIndex === 'number') {
-        updatePayload.currentQuestionIndex = newIndex;
+    return await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(sessionRef);
+      if (!snap.exists()) {
+        throw new Error(`Session ${sessionId} not found`);
       }
-    } else if (typeof newIndex === 'number') {
-      updatePayload.currentQuestionIndex = newIndex;
-    }
 
-    await updateDoc(doc(db, 'quizSessions', sessionId), updatePayload);
+      const session = snap.data() as QuizSession;
+
+      // Conditional state check to prevent duplicate transitions from concurrent tabs/timers
+      if (expectedStatus !== undefined && session.status !== expectedStatus) {
+        // State has already changed, skip duplicate advance
+        return false;
+      }
+      if (expectedIndex !== undefined && session.currentQuestionIndex !== expectedIndex) {
+        // Question index already progressed, skip duplicate advance
+        return false;
+      }
+
+      const now = Date.now();
+      const targetIndex = typeof newIndex === 'number' ? newIndex : session.currentQuestionIndex;
+      const currentQ = session.questionsSnapshot[targetIndex];
+
+      const updatePayload: Partial<QuizSession> = {
+        status: newStatus,
+        currentQuestionIndex: targetIndex,
+        transitionToken: `tx_${now}_${Math.random().toString(36).substring(2, 7)}`,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (newStatus === 'question') {
+        const timeLimitSec = typeof currentQ?.timeLimit === 'number' && currentQ.timeLimit > 0 ? currentQ.timeLimit : 20;
+        updatePayload.questionStartedAt = now;
+        updatePayload.questionEndsAt = now + (timeLimitSec * 1000);
+        updatePayload.revealEndsAt = undefined;
+      } else if (newStatus === 'reveal') {
+        // If question had auto-advance enabled, calculate revealEndsAt
+        const revealDuration = typeof currentQ?.revealDurationSeconds === 'number' && currentQ.revealDurationSeconds > 0
+          ? currentQ.revealDurationSeconds
+          : 5;
+        
+        if (currentQ?.autoAdvanceEnabled) {
+          updatePayload.revealEndsAt = now + (revealDuration * 1000);
+        } else {
+          updatePayload.revealEndsAt = undefined;
+        }
+      } else {
+        updatePayload.revealEndsAt = undefined;
+      }
+
+      transaction.update(sessionRef, updatePayload);
+      return true;
+    });
   } catch (err) {
     handleFirestoreError(err, OperationType.UPDATE, `quizSessions/${sessionId}`);
+    return false;
   }
 }
 

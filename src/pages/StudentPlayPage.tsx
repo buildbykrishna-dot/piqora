@@ -9,7 +9,8 @@ import {
   Sparkles, 
   Radio, 
   Trophy,
-  ArrowRight
+  ArrowRight,
+  Zap
 } from 'lucide-react';
 import { Participant, QuizSession, OptionLetter } from '../types';
 import { subscribeToSession, submitStudentAnswer } from '../lib/dbService';
@@ -35,8 +36,9 @@ export const StudentPlayPage: React.FC<StudentPlayPageProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [lastSubmissionResult, setLastSubmissionResult] = useState<{ isCorrect: boolean; pointsAwarded: number } | null>(null);
 
-  // Countdown timer for student screen
+  // Countdown timers for student screen
   const [secondsRemaining, setSecondsRemaining] = useState<number>(20);
+  const [revealSecondsRemaining, setRevealSecondsRemaining] = useState<number>(0);
 
   // Realtime subscription to live session
   useEffect(() => {
@@ -58,7 +60,7 @@ export const StudentPlayPage: React.FC<StudentPlayPageProps> = ({
     };
   }, [sessionId, initialParticipant.id]);
 
-  // Handle question phase transitions & timer
+  // Handle question phase transitions & timer using authoritative timestamps
   useEffect(() => {
     if (!session) return;
 
@@ -69,15 +71,34 @@ export const StudentPlayPage: React.FC<StudentPlayPageProps> = ({
       const currentQ = session.questionsSnapshot[session.currentQuestionIndex];
       const maxTime = typeof currentQ?.timeLimit === 'number' && currentQ.timeLimit > 0 ? currentQ.timeLimit : 20;
       const startedAt = session.questionStartedAt || Date.now();
+      const authoritativeEndsAt = session.questionEndsAt || (startedAt + maxTime * 1000);
 
       const updateTimer = () => {
-        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-        const remaining = Math.max(0, maxTime - elapsed);
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((authoritativeEndsAt - now) / 1000));
         setSecondsRemaining(remaining);
       };
 
       updateTimer();
-      const interval = setInterval(updateTimer, 500);
+      const interval = setInterval(updateTimer, 300);
+      return () => clearInterval(interval);
+    }
+
+    if (session.status === 'reveal') {
+      const currentQ = session.questionsSnapshot[session.currentQuestionIndex];
+      const revealSecs = typeof currentQ?.revealDurationSeconds === 'number' && currentQ.revealDurationSeconds > 0
+        ? currentQ.revealDurationSeconds
+        : 5;
+      const revealEndsAt = session.revealEndsAt || (Date.now() + revealSecs * 1000);
+
+      const updateRevealTimer = () => {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((revealEndsAt - now) / 1000));
+        setRevealSecondsRemaining(remaining);
+      };
+
+      updateRevealTimer();
+      const interval = setInterval(updateRevealTimer, 300);
       return () => clearInterval(interval);
     }
 
@@ -89,7 +110,13 @@ export const StudentPlayPage: React.FC<StudentPlayPageProps> = ({
         origin: { y: 0.6 }
       });
     }
-  }, [session?.status, session?.currentQuestionIndex, session?.questionStartedAt]);
+  }, [
+    session?.status, 
+    session?.currentQuestionIndex, 
+    session?.questionStartedAt, 
+    session?.questionEndsAt, 
+    session?.revealEndsAt
+  ]);
 
   const handleSelectAnswer = async (opt: OptionLetter) => {
     if (!session || session.status !== 'question' || selectedOption || submitting) return;
@@ -279,6 +306,15 @@ export const StudentPlayPage: React.FC<StudentPlayPageProps> = ({
               <div className="p-3.5 bg-slate-800/80 rounded-2xl border border-slate-700 text-left text-xs text-slate-300">
                 <span className="font-bold text-violet-400 block mb-0.5">Professor's Note:</span>
                 {currentQ.explanation}
+              </div>
+            )}
+
+            {/* Next Question countdown indicator */}
+            {currentQ?.autoAdvanceEnabled && (
+              <div className="p-3 bg-violet-950/60 border border-violet-800/60 rounded-2xl flex items-center justify-center gap-2 text-xs text-violet-300 font-semibold animate-in fade-in duration-200">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>Next question starting in:</span>
+                <span className="font-mono font-black text-amber-400 text-sm">{revealSecondsRemaining}s</span>
               </div>
             )}
           </div>

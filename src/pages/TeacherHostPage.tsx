@@ -15,7 +15,10 @@ import {
   ChevronRight,
   Maximize2,
   X,
-  Sparkles
+  Sparkles,
+  Zap,
+  Pause,
+  FastForward
 } from 'lucide-react';
 import { QuizSession, Participant, AnswerSubmission, OptionLetter } from '../types';
 import { 
@@ -41,8 +44,10 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
   const [answers, setAnswers] = useState<AnswerSubmission[]>([]);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
-  // Local question countdown timer
+  // Local countdown timers
   const [secondsRemaining, setSecondsRemaining] = useState<number>(20);
+  const [revealSecondsRemaining, setRevealSecondsRemaining] = useState<number>(0);
+  const [autoAdvancePaused, setAutoAdvancePaused] = useState<boolean>(false);
 
   // Generate shareable QR code encoding the live room URL and PIN
   useEffect(() => {
@@ -79,25 +84,55 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
     };
   }, [initialSession.id]);
 
-  // Handle countdown during 'question' status
+  // Handle countdown during 'question' status using authoritative timestamps
   useEffect(() => {
     if (session.status === 'question') {
       const currentQ = session.questionsSnapshot[session.currentQuestionIndex];
       const maxTime = typeof currentQ?.timeLimit === 'number' && currentQ.timeLimit > 0 ? currentQ.timeLimit : 20;
       const startedAt = session.questionStartedAt || Date.now();
+      const authoritativeEndsAt = session.questionEndsAt || (startedAt + maxTime * 1000);
 
       const updateTimer = () => {
-        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-        const remaining = Math.max(0, maxTime - elapsed);
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((authoritativeEndsAt - now) / 1000));
         setSecondsRemaining(remaining);
         if (remaining <= 0) {
-          // Timer finished -> auto reveal answers
-          advanceSessionState(session.id, 'reveal');
+          // Authoritative timer expired -> automatically advance session to reveal
+          advanceSessionState(session.id, 'reveal', undefined, 'question', session.currentQuestionIndex);
         }
       };
 
       updateTimer();
-      const interval = setInterval(updateTimer, 500);
+      const interval = setInterval(updateTimer, 300);
+      return () => clearInterval(interval);
+    }
+
+    if (session.status === 'reveal') {
+      const currentQ = session.questionsSnapshot[session.currentQuestionIndex];
+      const isAutoAdvance = Boolean(currentQ?.autoAdvanceEnabled);
+      const revealSecs = typeof currentQ?.revealDurationSeconds === 'number' && currentQ.revealDurationSeconds > 0
+        ? currentQ.revealDurationSeconds
+        : 5;
+      const revealEndsAt = session.revealEndsAt || (Date.now() + revealSecs * 1000);
+
+      const updateRevealTimer = () => {
+        const now = Date.now();
+        const remaining = Math.max(0, Math.ceil((revealEndsAt - now) / 1000));
+        setRevealSecondsRemaining(remaining);
+
+        if (isAutoAdvance && !autoAdvancePaused && remaining <= 0) {
+          // Auto-advance countdown reached zero! Automatically proceed to next question or final results
+          const nextIdx = session.currentQuestionIndex + 1;
+          if (nextIdx < session.totalQuestions) {
+            advanceSessionState(session.id, 'question', nextIdx, 'reveal', session.currentQuestionIndex);
+          } else {
+            advanceSessionState(session.id, 'finished', undefined, 'reveal', session.currentQuestionIndex);
+          }
+        }
+      };
+
+      updateRevealTimer();
+      const interval = setInterval(updateRevealTimer, 300);
       return () => clearInterval(interval);
     }
 
@@ -108,7 +143,16 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
         origin: { y: 0.5 }
       });
     }
-  }, [session.status, session.currentQuestionIndex, session.questionStartedAt, session.id]);
+  }, [
+    session.status, 
+    session.currentQuestionIndex, 
+    session.questionStartedAt, 
+    session.questionEndsAt, 
+    session.revealEndsAt, 
+    session.id, 
+    session.totalQuestions, 
+    autoAdvancePaused
+  ]);
 
   const currentQ = session.questionsSnapshot[session.currentQuestionIndex];
 
@@ -125,11 +169,11 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
     if (participants.length === 0) {
       toast.info('Starting quiz in presentation mode. Students can still join live!');
     }
-    await advanceSessionState(session.id, 'question', 0);
+    await advanceSessionState(session.id, 'question', 0, 'waiting', 0);
   };
 
   const handleRevealAnswer = async () => {
-    await advanceSessionState(session.id, 'reveal');
+    await advanceSessionState(session.id, 'reveal', undefined, 'question', session.currentQuestionIndex);
   };
 
   const handleShowLeaderboard = async () => {
@@ -137,6 +181,15 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
   };
 
   const handleNextQuestion = async () => {
+    const nextIdx = session.currentQuestionIndex + 1;
+    if (nextIdx < session.totalQuestions) {
+      await advanceSessionState(session.id, 'question', nextIdx);
+    } else {
+      await advanceSessionState(session.id, 'finished');
+    }
+  };
+
+  const handleSkipToNextNow = async () => {
     const nextIdx = session.currentQuestionIndex + 1;
     if (nextIdx < session.totalQuestions) {
       await advanceSessionState(session.id, 'question', nextIdx);
@@ -340,23 +393,78 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
         {session.status === 'reveal' && (
           /* Reveal Stage with Answer Distribution */
           <div className="bg-slate-900/90 rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-2xl space-y-6">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 flex-wrap gap-4">
               <div>
-                <span className="text-xs font-bold text-violet-400 uppercase tracking-wider">
-                  Answer Distribution
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-violet-400 uppercase tracking-wider">
+                    Answer Distribution
+                  </span>
+                  {currentQ?.autoAdvanceEnabled && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-violet-950 border border-violet-800 text-violet-300">
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      Auto-Advance Active
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-xl sm:text-2xl font-bold text-white mt-0.5">
                   Correct Answer: <strong className="text-emerald-400">Option {currentQ?.correctAnswer}</strong>
                 </h3>
               </div>
 
-              <button
-                onClick={handleShowLeaderboard}
-                className="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-2 shadow-lg shadow-violet-600/20 cursor-pointer"
-              >
-                <span>Show Leaderboard</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              {/* Reveal Controls: Auto-Advance Countdown, Pause, Skip to Next, Show Leaderboard */}
+              <div className="flex items-center flex-wrap gap-2.5">
+                {currentQ?.autoAdvanceEnabled && (
+                  <div className="flex items-center gap-2 bg-slate-950 px-3.5 py-1.5 rounded-xl border border-slate-800">
+                    <span className="text-xs text-slate-400 font-semibold">Next in:</span>
+                    <span className="font-mono text-base font-black text-amber-400 flex items-center gap-1">
+                      <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                      {revealSecondsRemaining}s
+                    </span>
+
+                    {/* Pause / Resume Override */}
+                    <button
+                      onClick={() => setAutoAdvancePaused(!autoAdvancePaused)}
+                      className={`px-2 py-1 rounded-lg text-[11px] font-bold border transition-colors flex items-center gap-1 cursor-pointer ${
+                        autoAdvancePaused 
+                          ? 'bg-amber-950/80 border-amber-700 text-amber-300' 
+                          : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                      }`}
+                      title={autoAdvancePaused ? 'Resume auto-advance' : 'Pause auto-advance timer'}
+                    >
+                      {autoAdvancePaused ? (
+                        <>
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>Resume</span>
+                        </>
+                      ) : (
+                        <>
+                          <Pause className="w-3 h-3" />
+                          <span>Pause</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {/* Instant Next Question Button */}
+                <button
+                  onClick={handleSkipToNextNow}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                  title="Immediately advance to next question"
+                >
+                  <FastForward className="w-3.5 h-3.5" />
+                  <span>{session.currentQuestionIndex + 1 < session.totalQuestions ? 'Next Question' : 'Finish Quiz'}</span>
+                </button>
+
+                {/* Show Leaderboard Button */}
+                <button
+                  onClick={handleShowLeaderboard}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-md shadow-violet-600/20 cursor-pointer"
+                >
+                  <span>Leaderboard</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
             {/* Answer Distribution Bars */}
