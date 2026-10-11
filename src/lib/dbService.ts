@@ -334,22 +334,43 @@ export function generatePin(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-export async function createLiveSession(quiz: Quiz, teacherId: string): Promise<QuizSession> {
+export async function createLiveSession(quizInput: Quiz, teacherId: string): Promise<QuizSession> {
   const sessionId = 'session_' + Math.random().toString(36).substring(2, 10);
   const pin = generatePin();
+
+  // Load the latest saved quiz directly from Firestore to ensure hosting uses fresh saved data
+  let activeQuiz = quizInput;
+  try {
+    const snap = await getDoc(doc(db, 'quizzes', quizInput.id));
+    if (snap.exists()) {
+      activeQuiz = snap.data() as Quiz;
+    }
+  } catch (err) {
+    console.warn('Could not fetch fresh quiz from Firestore in createLiveSession, using supplied quiz snapshot:', err);
+  }
+
+  // Preserve the saved question order, timer and points for each question
+  const rawQuestions = activeQuiz.questions || [];
+  const sortedQuestions = [...rawQuestions].sort((a, b) => (a.order || 0) - (b.order || 0));
+  const questionsSnapshot: Question[] = sortedQuestions.map((q, idx) => ({
+    ...q,
+    order: q.order || idx + 1,
+    timeLimit: typeof q.timeLimit === 'number' && q.timeLimit > 0 ? q.timeLimit : 20,
+    points: typeof q.points === 'number' ? q.points : 1000
+  }));
 
   const newSession: QuizSession = {
     id: sessionId,
     pin,
-    quizId: quiz.id,
-    quizTitle: quiz.title,
+    quizId: activeQuiz.id,
+    quizTitle: activeQuiz.title,
     teacherId,
     status: 'waiting',
     currentQuestionIndex: 0,
     questionStartedAt: 0,
-    totalQuestions: quiz.questions?.length || 0,
+    totalQuestions: questionsSnapshot.length,
     participantCount: 0,
-    questionsSnapshot: quiz.questions || [],
+    questionsSnapshot,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -468,14 +489,15 @@ export async function submitStudentAnswer(
   if (!currentQ) return { isCorrect: false, pointsAwarded: 0 };
 
   const isCorrect = currentQ.correctAnswer === selectedOption;
-  const timeLimitMs = (currentQ.timeLimit || 20) * 1000;
+  const timeLimitSeconds = typeof currentQ.timeLimit === 'number' && currentQ.timeLimit > 0 ? currentQ.timeLimit : 20;
+  const timeLimitMs = timeLimitSeconds * 1000;
   const responseTimeMs = Math.max(100, Date.now() - (session.questionStartedAt || Date.now()));
   
   // Authoritative Kahoot-style scoring algorithm:
   // Base points * (1 - (responseTime / 2 * timeLimit))
   let pointsAwarded = 0;
   if (isCorrect) {
-    const maxPoints = currentQ.points || 1000;
+    const maxPoints = typeof currentQ.points === 'number' ? currentQ.points : 1000;
     const speedFactor = Math.max(0.5, 1 - (responseTimeMs / (2 * timeLimitMs)));
     pointsAwarded = Math.round(maxPoints * speedFactor);
   }

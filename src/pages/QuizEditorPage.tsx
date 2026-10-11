@@ -31,6 +31,12 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
   const toast = useToast();
   const teacherId = user?.uid || 'demo_teacher';
 
+  const [currentQuizId, setCurrentQuizId] = useState<string>(() => {
+    return quizId && quizId !== 'new' ? quizId : `quiz_${Date.now()}`;
+  });
+  const isExistingQuiz = Boolean(quizId && quizId !== 'new');
+  const [existingQuiz, setExistingQuiz] = useState<Quiz | null>(null);
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [subject, setSubject] = useState('Computer Science');
@@ -54,27 +60,46 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
   ]);
   const [activeQIndex, setActiveQIndex] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [savingAction, setSavingAction] = useState<'save' | 'publish' | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (quizId && quizId !== 'new') {
+      setCurrentQuizId(quizId);
       setLoading(true);
-      getQuizById(quizId).then((existing) => {
-        if (existing) {
-          setTitle(existing.title);
-          setDescription(existing.description || '');
-          setSubject(existing.subject || 'Computer Science');
-          setCourseLabel(existing.courseLabel || '');
-          setCoverColor(existing.coverColor || '#6D28D9');
-          setTagsInput(existing.tags?.join(', ') || '');
-          setIsPublished(existing.isPublished);
-          setIsPublic(existing.isPublic ?? true);
-          if (existing.questions && existing.questions.length > 0) {
-            setQuestions(existing.questions);
+      getQuizById(quizId)
+        .then((existing) => {
+          if (existing) {
+            setExistingQuiz(existing);
+            setTitle(existing.title || '');
+            setDescription(existing.description || '');
+            setSubject(existing.subject || 'Computer Science');
+            setCourseLabel(existing.courseLabel || '');
+            setCoverColor(existing.coverColor || '#6D28D9');
+            setTagsInput(existing.tags?.join(', ') || '');
+            setIsPublished(Boolean(existing.isPublished));
+            setIsPublic(existing.isPublic ?? true);
+            if (existing.questions && existing.questions.length > 0) {
+              const sorted = [...existing.questions].sort((a, b) => (a.order || 0) - (b.order || 0));
+              const mapped = sorted.map((q, idx) => ({
+                ...q,
+                id: q.id || `q_${Date.now()}_${idx + 1}`,
+                order: idx + 1,
+                timeLimit: typeof q.timeLimit === 'number' && q.timeLimit > 0 ? q.timeLimit : 20,
+                points: typeof q.points === 'number' ? q.points : 1000
+              }));
+              setQuestions(mapped);
+            }
           }
-        }
-        setLoading(false);
-      });
+          setLoading(false);
+        })
+        .catch((err) => {
+          console.error('Failed to load quiz:', err);
+          setLoading(false);
+        });
+    } else {
+      setCurrentQuizId(`quiz_${Date.now()}`);
+      setExistingQuiz(null);
     }
   }, [quizId]);
 
@@ -118,7 +143,9 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
     const dupe: Question = {
       ...target,
       id: `q_${Date.now()}_dupe`,
-      order: questions.length + 1
+      order: questions.length + 1,
+      timeLimit: target.timeLimit ?? 20,
+      points: target.points ?? 1000
     };
     setQuestions((prev) => [...prev, dupe]);
     setActiveQIndex(questions.length);
@@ -131,7 +158,8 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
       return;
     }
     const filtered = questions.filter((_, i) => i !== index);
-    setQuestions(filtered);
+    const reindexed = filtered.map((q, i) => ({ ...q, order: i + 1 }));
+    setQuestions(reindexed);
     setActiveQIndex(Math.max(0, index - 1));
     toast.info('Question removed');
   };
@@ -143,7 +171,8 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
     const temp = copy[index];
     copy[index] = copy[newIdx];
     copy[newIdx] = temp;
-    setQuestions(copy);
+    const reordered = copy.map((q, i) => ({ ...q, order: i + 1 }));
+    setQuestions(reordered);
     setActiveQIndex(newIdx);
   };
 
@@ -172,44 +201,94 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
     return true;
   };
 
-  const handleSave = async (publishState?: boolean) => {
-    const willPublish = publishState !== undefined ? publishState : isPublished;
-    if (willPublish && !validateQuiz()) {
+  // Build full quiz payload ensuring question settings and document metadata are preserved
+  const buildQuizPayload = (publishState: boolean): Quiz => {
+    const tags = tagsInput
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    const normalizedQuestions: Question[] = questions.map((q, idx) => ({
+      ...q,
+      id: q.id || `q_${Date.now()}_${idx + 1}`,
+      order: idx + 1,
+      timeLimit: typeof q.timeLimit === 'number' && !isNaN(q.timeLimit) && q.timeLimit > 0 ? q.timeLimit : 20,
+      points: typeof q.points === 'number' && !isNaN(q.points) ? q.points : 1000
+    }));
+
+    return {
+      ...(existingQuiz || {}),
+      id: currentQuizId,
+      teacherId: user?.uid || existingQuiz?.teacherId || teacherId,
+      title: title.trim() || 'Untitled College Quiz',
+      description: description.trim(),
+      subject: subject.trim() || 'General',
+      courseLabel: courseLabel.trim() || undefined,
+      coverColor,
+      tags,
+      isPublished: publishState,
+      isPublic,
+      questionsCount: normalizedQuestions.length,
+      questions: normalizedQuestions,
+      createdAt: existingQuiz?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+  };
+
+  // 1. Save Changes handler: saves edits without publishing or creating duplicates
+  const handleSaveChanges = async () => {
+    if (saving) return; // Prevent multiple simultaneous save requests
+
+    setSaving(true);
+    setSavingAction('save');
+
+    try {
+      // Keep existing publication state (or default unpublished if brand new draft)
+      const targetPublishState = existingQuiz ? existingQuiz.isPublished : false;
+      const quizData = buildQuizPayload(targetPublishState);
+
+      await saveQuiz(quizData);
+      setExistingQuiz(quizData);
+      
+      // If saving a newly created quiz for the first time, update browser history so subsequent saves don't duplicate
+      if (!quizId || quizId === 'new') {
+        window.history.replaceState({}, '', `/dashboard/quizzes/${currentQuizId}`);
+      }
+
+      toast.success('Changes saved successfully.');
+    } catch (err: any) {
+      console.error('Failed to save quiz changes:', err);
+      toast.error(err?.message ? `Failed to save changes: ${err.message}` : 'Failed to save changes. Unsaved edits were preserved.');
+    } finally {
+      setSaving(false);
+      setSavingAction(null);
+    }
+  };
+
+  // 2. Publish Quiz handler: validates completeness, publishes quiz and redirects
+  const handlePublishQuiz = async () => {
+    if (saving) return; // Prevent multiple simultaneous save requests
+
+    if (!validateQuiz()) {
       return;
     }
 
     setSaving(true);
-    try {
-      const id = quizId && quizId !== 'new' ? quizId : `quiz_${Date.now()}`;
-      const tags = tagsInput
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean);
+    setSavingAction('publish');
 
-      const quizData: Quiz = {
-        id,
-        teacherId,
-        title: title.trim() || 'Untitled College Quiz',
-        description: description.trim(),
-        subject: subject.trim() || 'General',
-        courseLabel: courseLabel.trim() || undefined,
-        coverColor,
-        tags,
-        isPublished: willPublish,
-        isPublic,
-        questionsCount: questions.length,
-        questions,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+    try {
+      const quizData = buildQuizPayload(true);
 
       await saveQuiz(quizData);
-      toast.success(willPublish ? 'Quiz published to your dashboard!' : 'Draft saved successfully');
+      setExistingQuiz(quizData);
+      toast.success('Quiz published successfully!');
       onNavigate('/dashboard/content');
-    } catch (err) {
-      toast.error('Failed to save quiz. Please try again.');
+    } catch (err: any) {
+      console.error('Failed to publish quiz:', err);
+      toast.error(err?.message ? `Failed to publish quiz: ${err.message}` : 'Failed to publish quiz. Please try again.');
     } finally {
       setSaving(false);
+      setSavingAction(null);
     }
   };
 
@@ -224,6 +303,20 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
     { letter: 'D' as OptionLetter, name: 'Emerald / Square', bg: 'bg-emerald-600', border: 'border-emerald-400', symbol: '■' },
   ];
 
+  // Standard duration options plus activeQuestion if custom
+  const standardDurations = [5, 10, 15, 20, 25, 30, 45, 60, 90, 120];
+  const activeDuration = activeQuestion.timeLimit ?? 20;
+  const timerOptions = standardDurations.includes(activeDuration)
+    ? standardDurations
+    : [...standardDurations, activeDuration].sort((a, b) => a - b);
+
+  // Standard point options plus activeQuestion if custom
+  const standardPoints = [0, 500, 1000, 1500, 2000];
+  const activePoints = activeQuestion.points ?? 1000;
+  const pointOptions = standardPoints.includes(activePoints)
+    ? standardPoints
+    : [...standardPoints, activePoints].sort((a, b) => a - b);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-20">
       {/* Editor Header Bar */}
@@ -232,12 +325,13 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
           <button
             onClick={() => onNavigate('/dashboard/content')}
             className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+            title="Return to content repository"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
             <span className="text-[11px] font-bold text-violet-600 uppercase tracking-wider">
-              {quizId && quizId !== 'new' ? 'Edit Quiz' : 'New Quiz Creator'}
+              {isExistingQuiz ? 'Edit Quiz' : 'New Quiz Creator'}
             </span>
             <h2 className="text-lg font-bold text-slate-900 leading-tight">
               {title || 'Untitled College Quiz'}
@@ -245,21 +339,46 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
           </div>
         </div>
 
+        {/* Action Buttons: Save Changes / Save Draft & Publish Quiz */}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => handleSave(false)}
+            type="button"
+            onClick={handleSaveChanges}
             disabled={saving}
-            className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+            className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs"
+            title="Save changes to Firestore without publishing"
           >
-            Save Draft
+            {saving && savingAction === 'save' ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-slate-600 border-t-transparent rounded-full animate-spin" />
+                <span>{isExistingQuiz ? 'Saving Changes...' : 'Saving Draft...'}</span>
+              </>
+            ) : (
+              <>
+                <Save className="w-3.5 h-3.5 text-slate-600" />
+                <span>{isExistingQuiz ? 'Save Changes' : 'Save Draft'}</span>
+              </>
+            )}
           </button>
+
           <button
-            onClick={() => handleSave(true)}
+            type="button"
+            onClick={handlePublishQuiz}
             disabled={saving}
-            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl text-xs shadow-md shadow-violet-500/20 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl text-xs shadow-md shadow-violet-500/20 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Publish quiz for live hosting in lecture hall"
           >
-            <Save className="w-4 h-4" />
-            <span>{saving ? 'Saving...' : 'Publish Quiz'}</span>
+            {saving && savingAction === 'publish' ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Publishing...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Publish Quiz</span>
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -379,17 +498,19 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
                 >
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs font-extrabold text-violet-700">Q{idx + 1}</span>
-                    <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
-                      <Clock className="w-3 h-3" />
-                      {q.timeLimit}s
+                    <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono font-bold">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      {q.timeLimit ?? 20}s
                     </span>
                   </div>
                   <p className="text-xs font-semibold text-slate-800 line-clamp-1">
                     {q.text.trim() || 'Empty question prompt...'}
                   </p>
-                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>Key: {q.correctAnswer}</span>
-                    <span>{q.points} pts</span>
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                    <span className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-slate-700">
+                      Key: {q.correctAnswer}
+                    </span>
+                    <span className="text-amber-600 font-bold">{q.points ?? 1000} pts</span>
                   </div>
                 </div>
               );
@@ -417,16 +538,16 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
                 <button
                   disabled={activeQIndex === 0}
                   onClick={() => handleMoveQuestion(activeQIndex, 'up')}
-                  className="p-1.5 rounded-lg border text-slate-500 hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
-                  title="Move up"
+                  className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                  title="Move question earlier"
                 >
                   <ChevronUp className="w-4 h-4" />
                 </button>
                 <button
                   disabled={activeQIndex === questions.length - 1}
                   onClick={() => handleMoveQuestion(activeQIndex, 'down')}
-                  className="p-1.5 rounded-lg border text-slate-500 hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
-                  title="Move down"
+                  className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                  title="Move question later"
                 >
                   <ChevronDown className="w-4 h-4" />
                 </button>
@@ -434,32 +555,36 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
 
               <div className="flex items-center gap-3">
                 {/* Time Limit dropdown */}
-                <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                  <Clock className="w-4 h-4 text-slate-400" />
+                <div className="flex items-center gap-1.5 text-xs text-slate-700">
+                  <Clock className="w-4 h-4 text-violet-600" />
+                  <span className="font-bold text-slate-600">Timer:</span>
                   <select
-                    value={activeQuestion.timeLimit}
+                    value={activeQuestion.timeLimit ?? 20}
                     onChange={(e) => updateActiveQuestion({ timeLimit: parseInt(e.target.value, 10) })}
-                    className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none"
+                    className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer"
                   >
-                    <option value={10}>10s</option>
-                    <option value={20}>20s (Standard)</option>
-                    <option value={30}>30s</option>
-                    <option value={60}>60s</option>
-                    <option value={90}>90s</option>
+                    {timerOptions.map((dur) => (
+                      <option key={dur} value={dur}>
+                        {dur}s {dur === 20 ? '(Standard)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 {/* Points dropdown */}
-                <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                <div className="flex items-center gap-1.5 text-xs text-slate-700">
                   <Award className="w-4 h-4 text-amber-500" />
+                  <span className="font-bold text-slate-600">Points:</span>
                   <select
-                    value={activeQuestion.points}
+                    value={activeQuestion.points ?? 1000}
                     onChange={(e) => updateActiveQuestion({ points: parseInt(e.target.value, 10) })}
-                    className="px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none"
+                    className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-violet-500 cursor-pointer"
                   >
-                    <option value={500}>500 pts</option>
-                    <option value={1000}>1000 pts (Standard)</option>
-                    <option value={2000}>2000 pts (Double)</option>
+                    {pointOptions.map((pts) => (
+                      <option key={pts} value={pts}>
+                        {pts} pts {pts === 1000 ? '(Standard)' : pts === 2000 ? '(Double)' : pts === 0 ? '(No points)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -501,7 +626,7 @@ export const QuizEditorPage: React.FC<QuizEditorPageProps> = ({ quizId, onNaviga
                   Four Answer Options (Select the radio to set the correct answer) *
                 </label>
                 <span className="text-[11px] text-slate-500">
-                  Correct Answer: <strong className="text-violet-700">{activeQuestion.correctAnswer}</strong>
+                  Correct Answer: <strong className="text-violet-700">Option {activeQuestion.correctAnswer}</strong>
                 </span>
               </div>
 

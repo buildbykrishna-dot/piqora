@@ -83,7 +83,7 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
   useEffect(() => {
     if (session.status === 'question') {
       const currentQ = session.questionsSnapshot[session.currentQuestionIndex];
-      const maxTime = currentQ?.timeLimit || 20;
+      const maxTime = typeof currentQ?.timeLimit === 'number' && currentQ.timeLimit > 0 ? currentQ.timeLimit : 20;
       const startedAt = session.questionStartedAt || Date.now();
 
       const updateTimer = () => {
@@ -289,11 +289,16 @@ export const TeacherHostPage: React.FC<TeacherHostPageProps> = ({
                   <span>{currentAnswers.length} of {participants.length || 1} Answered</span>
                 </div>
 
-                {/* Timer */}
-                <span className={`font-mono text-xl font-black flex items-center gap-1.5 ${secondsRemaining <= 5 ? 'text-rose-500 animate-pulse' : 'text-amber-400'}`}>
-                  <Clock className="w-5 h-5" />
-                  {secondsRemaining}s
-                </span>
+                {/* Timer & Saved Points */}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-amber-300 bg-amber-950/70 border border-amber-800/60 px-2.5 py-1 rounded-xl">
+                    {currentQ?.points ?? 1000} pts
+                  </span>
+                  <span className={`font-mono text-xl font-black flex items-center gap-1.5 ${secondsRemaining <= 5 ? 'text-rose-500 animate-pulse' : 'text-amber-400'}`}>
+                    <Clock className="w-5 h-5" />
+                    {secondsRemaining}s
+                  </span>
+                </div>
               </div>
 
               <h2 className="text-2xl sm:text-4xl font-extrabold text-white leading-tight max-w-4xl mx-auto py-4">

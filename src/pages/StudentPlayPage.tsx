@@ -67,7 +67,7 @@ export const StudentPlayPage: React.FC<StudentPlayPageProps> = ({
       setLastSubmissionResult(null);
       
       const currentQ = session.questionsSnapshot[session.currentQuestionIndex];
-      const maxTime = currentQ?.timeLimit || 20;
+      const maxTime = typeof currentQ?.timeLimit === 'number' && currentQ.timeLimit > 0 ? currentQ.timeLimit : 20;
       const startedAt = session.questionStartedAt || Date.now();
 
       const updateTimer = () => {
@@ -194,10 +194,15 @@ export const StudentPlayPage: React.FC<StudentPlayPageProps> = ({
                 <span className="font-bold text-violet-400 uppercase tracking-wider">
                   Q{session.currentQuestionIndex + 1} of {session.totalQuestions}
                 </span>
-                <span className={`font-mono font-bold flex items-center gap-1 ${secondsRemaining <= 5 ? 'text-rose-500 animate-pulse text-sm' : 'text-slate-300'}`}>
-                  <Clock className="w-3.5 h-3.5" />
-                  {secondsRemaining}s
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-amber-300 font-bold bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded">
+                    {currentQ?.points ?? 1000} pts
+                  </span>
+                  <span className={`font-mono font-bold flex items-center gap-1 ${secondsRemaining <= 5 ? 'text-rose-500 animate-pulse text-sm' : 'text-slate-300'}`}>
+                    <Clock className="w-3.5 h-3.5" />
+                    {secondsRemaining}s
+                  </span>
+                </div>
               </div>
               <h3 className="text-base sm:text-lg font-bold text-white leading-snug">
                 {currentQ?.text}
